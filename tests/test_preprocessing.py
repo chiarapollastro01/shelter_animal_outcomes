@@ -2,9 +2,9 @@
 Unit tests for the preprocessing module.
 
 """
-
-import pandas as pd
 import numpy as np
+import pandas as pd
+from src.preprocessing import NameFeaturesExtractor
 from src.preprocessing import extract_age_in_days, DataCleaner
 
 def test_extract_age_in_days():
@@ -50,6 +50,7 @@ def test_datacleaner_pipeline():
     """
     Test the entire DataCleaner pipeline: dropping columns, 
     mode imputation for categorical data, and median imputation for numeric data.
+
     """
     # 1. Create a mock DataFrame with various columns, some of which will be dropped, and some with missing values.
     df_mock = pd.DataFrame({
@@ -90,12 +91,12 @@ def test_datacleaner_pipeline():
 
 def test_datacleaner_extreme_cases():
     """
-    Testa il comportamento del DataCleaner con estremi:
-    un dataset senza alcun valore mancante e un dataset con sole colonne vuote.
+    Test the DataCleaner behavior with extreme cases:
+    a dataset with zero missing values and a dataset with 100% missing values.
     """
     cleaner = DataCleaner()
     
-    # CASO A: Dati perfetti (0 NaN)
+    # CASE A: Perfect data (0 NaN)
     df_perfect = pd.DataFrame({
         "SexuponOutcome": ["Neutered Male", "Intact Female"],
         "AgeuponOutcome": ["1 year", "2 years"]
@@ -105,7 +106,7 @@ def test_datacleaner_extreme_cases():
     assert df_clean_perfect["SexuponOutcome"].isnull().sum() == 0
     assert df_clean_perfect["age_in_days"].isnull().sum() == 0
     
-    # CASO B: Il disastro totale (100% NaN)
+    # CASE B: Total disaster (100% NaN)
     df_disaster = pd.DataFrame({
         "SexuponOutcome": [np.nan, np.nan],
         "AgeuponOutcome": [np.nan, np.nan]
@@ -113,8 +114,75 @@ def test_datacleaner_extreme_cases():
     
     df_clean_disaster = cleaner.clean_data(df_disaster)
     
-    # Il sesso dovrebbe usare il fallback "Unknown" perché non c'è una moda
+    # Sex should use the fallback "Unknown" because there is no mode
     assert df_clean_disaster.loc[0, "SexuponOutcome"] == "Unknown"
     
-    # L'età dovrebbe rimanere NaN perché la mediana di soli NaN è NaN
+    # Age should remain NaN because the median of only NaNs is NaN
     assert np.isnan(df_clean_disaster.loc[0, "age_in_days"])
+
+
+def test_name_extractor_happy_path():
+    """
+    Test the standard behavior of the name extractor 
+    on clean and straightforward data.
+    """
+    # 1. ARRANGE
+    df_mock = pd.DataFrame({
+        "AnimalID": ["A1", "A2", "A3"],
+        "Name": ["Bella", np.nan, "Maximus"]
+    })
+    
+    extractor = NameFeaturesExtractor()
+    
+    # 2. ACT
+    df_features = extractor.extract_features(df_mock)
+    
+    # 3. ASSERT
+    assert "has_name" in df_features.columns
+    # Controllo di sicurezza: verifichiamo che name_length non ci sia davvero più
+    assert "name_length" not in df_features.columns 
+    
+    # Verify Bella (Valid name)
+    assert df_features.loc[0, "has_name"] == 1
+    
+    # Verify NaN (No name)
+    assert df_features.loc[1, "has_name"] == 0
+    
+    # Verify Maximus (Valid name)
+    assert df_features.loc[2, "has_name"] == 1
+
+def test_name_extractor_edge_cases():
+    """
+    Test the resilience of the extractor against edge cases:
+    strings with only spaces, empty strings, and a missing column.
+    """
+    # CASE A: Test empty spaces and anomalous strings
+    df_anomalies = pd.DataFrame({
+        "Name": [
+            "   ",    # 3 spaces (Typical human error)
+            "",       # Actual empty string
+            " Luna ", # Leading and trailing spaces
+            np.nan    # Total disaster
+        ]
+    })
+    
+    extractor = NameFeaturesExtractor()
+    df_clean = extractor.extract_features(df_anomalies)
+    
+    # "   " and "" must count as 0 (no name)
+    assert df_clean.loc[0, "has_name"] == 0
+    assert df_clean.loc[1, "has_name"] == 0
+    
+    # " Luna " must have spaces stripped: counts as 1
+    assert df_clean.loc[2, "has_name"] == 1
+    
+    # CASE B: Test the total absence of the column (Guard Clause)
+    df_missing_column = pd.DataFrame({
+        "AnimalID": ["A1", "A2"],
+        "Age": [5, 2]
+    })
+    
+    # It must not crash, it should just return the original df intact
+    df_survived = extractor.extract_features(df_missing_column)
+    assert "has_name" not in df_survived.columns
+    assert "AnimalID" in df_survived.columns
