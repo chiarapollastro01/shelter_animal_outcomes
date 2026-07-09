@@ -71,9 +71,9 @@ class DataCleaner:
         df_clean = df.copy()
 
         # 1. Columns that are not relevant or have too many missing values are removed
-        for col in self.columns_to_remove:
-            if col in df_clean.columns:
-                df_clean = df_clean.drop(columns=[col])
+        df_clean = df_clean.drop(
+            columns=self.columns_to_remove, errors="ignore"
+        )
 
         # 2. Name imputation: if the 'Name' column is present, we fill missing values with "Unknown".
         if "Name" in df_clean.columns:
@@ -81,30 +81,26 @@ class DataCleaner:
         
         # 3. Sex imputation: categorical variable with only 1 missing value, so it's best to use the mode for imputation
         if "SexuponOutcome" in df_clean.columns:
-            missing_sex = df_clean["SexuponOutcome"].isnull().sum()
-            if missing_sex > 0:
                 modes = df_clean["SexuponOutcome"].mode()
                 mode_sex = modes[0] if not modes.empty else "Unknown"
                 df_clean["SexuponOutcome"] = df_clean["SexuponOutcome"].fillna(
                     mode_sex
                 )
 
-       # 4. In order to impute the age, we first need to convert the textual representation of age into a numeric format (in days). This is done using the extract_age_in_days function defined above.
+       # 4. Pipeline for AgeuponOutcome: we extract the age in days, impute missing values with the median, and apply a log1p transformation to reduce skewness.
         if "AgeuponOutcome" in df_clean.columns:
-            df_clean["age_in_days"] = extract_age_in_days(
-                df_clean["AgeuponOutcome"]
-                )
+            age_days = extract_age_in_days(df_clean["AgeuponOutcome"])
+
+            # Missing value imputation: we fill NaN values with the median of the non-NaN values. If all values are NaN, we leave them as NaN.
+            valid_ages = age_days.dropna()
+            if not valid_ages.empty:
+                age_days = age_days.fillna(valid_ages.median())
+
+            # Skewness reduction: we apply a log1p transformation to the age in days. This is particularly useful for machine learning models.
+            # log1p is used instead of log to handle the case where age_days might be 0.
+            df_clean["log_age_in_days"] = np.log1p(age_days)
             df_clean = df_clean.drop(columns=["AgeuponOutcome"])
 
-       # 5. Age imputation: we use the median to fill in missing values, as it is less sensitive to outliers than the mean.
-
-        if "age_in_days" in df_clean.columns:
-            valid_ages = df_clean["age_in_days"].dropna()
-            if not valid_ages.empty:
-                median_age = valid_ages.median()
-                df_clean["age_in_days"] = df_clean["age_in_days"].fillna(median_age)
-            
-      
         return df_clean
 
 
@@ -154,3 +150,9 @@ class TemporalFeaturesExtractor:
 
 
         return df_out
+    
+
+
+
+
+    #TODO: outliers for age + breed + color. visual representation of daytime feature + the ones that are missing like sex (maybe after/during feature eng.). 

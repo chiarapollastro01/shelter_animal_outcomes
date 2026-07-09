@@ -89,7 +89,7 @@ def test_datacleaner_column_dropping():
 
     GIVEN: a DataFrame containing columns to drop (AnimalID, OutcomeSubtype),
     AgeuponOutcome, and Name/SexuponOutcome WHEN: clean_data is executed THEN:
-    AnimalID, OutcomeSubtype, and AgeuponOutcome are removed, and age_in_days is
+    AnimalID, OutcomeSubtype, and AgeuponOutcome are removed, and log_age_in_days is
     added
     """
 
@@ -103,7 +103,7 @@ def test_datacleaner_column_dropping():
         },
         index=[10, 20],
     )
-    expected_columns = {"Name", "SexuponOutcome", "age_in_days"}
+    expected_columns = {"Name", "SexuponOutcome", "log_age_in_days"}
 
     df_clean = DataCleaner().clean_data(df_mock)
 
@@ -167,40 +167,56 @@ def test_datacleaner_sex_imputation():
     pd.testing.assert_series_equal(df_clean["SexuponOutcome"], expected)
 
 def test_datacleaner_age_imputation():
-    """Verify that AgeuponOutcome is converted to age_in_days and NaNs filled
+    """Verify that AgeuponOutcome is converted, imputed with median, and log-transformed.
 
-    with median.
-
-    GIVEN: a DataFrame with AgeuponOutcome values whose valid median in days is
-    730.0
+    GIVEN: a DataFrame with AgeuponOutcome values whose valid median in days is 730.0
     WHEN: clean_data is executed
-    THEN: AgeuponOutcome is converted, dropped, and its NaNs are filled with the
-    median (730.0), preserving the index
+    THEN: AgeuponOutcome is converted, dropped, its NaNs are filled with the median (730.0),
+          and the resulting column is log-transformed, preserving the index
     """
     df_mock = pd.DataFrame(
         {"AgeuponOutcome": ["1 year", "2 years", "3 years", np.nan, "2 years"]},
         index=[10, 20, 30, 40, 50],
     )
+    expected_days = np.array([365.0, 730.0, 1095.0, 730.0, 730.0])
     expected = pd.Series(
-        [365.0, 730.0, 1095.0, 730.0, 730.0],
+        np.log1p(expected_days),
         index=[10, 20, 30, 40, 50],
-        name="age_in_days",
+        name="log_age_in_days",
     )
 
     df_clean = DataCleaner().clean_data(df_mock)
 
-    pd.testing.assert_series_equal(df_clean["age_in_days"], expected)
+    pd.testing.assert_series_equal(df_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7)
+
+def test_datacleaner_age_log_transformation():
+    """
+    Verify that age values are correctly transformed using the np.log1p formula.
+
+    GIVEN: a DataFrame with valid AgeuponOutcome entries ("0 days", "7 days") 
+           that do not trigger median calculation (no missing values)
+    WHEN: clean_data is executed
+    THEN: the resulting log_age_in_days column contains mathematically correct 
+          log1p values, and the original column is dropped, preserving index
+    """
+    
+    df_mock = pd.DataFrame({"AgeuponOutcome": ["0 days", "7 days"]}, index=[10, 20])
+    
+    
+    expected = pd.Series([np.log1p(0.0), np.log1p(7.0)], index=[10, 20], name="log_age_in_days")
+
+    df_clean = DataCleaner().clean_data(df_mock)
+
+    pd.testing.assert_series_equal(df_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7)
 
 
 def test_datacleaner_all_nan():
-    """Verify DataCleaner behavior under extreme cases where all variables are
-
-    NaN.
+    """Verify DataCleaner behavior under extreme cases where all variables are NaN.
 
     GIVEN: a DataFrame where all elements are missing
     WHEN: clean_data is executed
-    THEN: Name and SexuponOutcome fall back to "Unknown", and age_in_days
-    remains NaN, preserving the original index and data types
+    THEN: Name and SexuponOutcome fall back to "Unknown", and log_age_in_days
+          remains NaN, preserving the original index and data types
     """
     df_mock = pd.DataFrame(
         {
@@ -214,7 +230,7 @@ def test_datacleaner_all_nan():
         {
             "Name": ["Unknown", "Unknown"],
             "SexuponOutcome": ["Unknown", "Unknown"],
-            "age_in_days": [np.nan, np.nan],
+            "log_age_in_days": [np.nan, np.nan], 
         },
         index=[100, 200],
     )
@@ -222,7 +238,6 @@ def test_datacleaner_all_nan():
     df_clean = DataCleaner().clean_data(df_mock)
 
     pd.testing.assert_frame_equal(df_clean, expected)
-
 
 # =====================================================================
 #                 TEMPORAL FEATURES EXTRACTOR TESTS
@@ -248,6 +263,7 @@ def test_temporal_basic_integer_extraction():
 
     df_transformed = TemporalFeaturesExtractor().transform(df_mock)
 
+# check_dtype=False is used to ignore potential differences in data types (e.g., int32 vs int64) that do not affect the correctness of the values being compared.
     pd.testing.assert_series_equal(df_transformed["Hour"], expected_hours, check_dtype=False)
     pd.testing.assert_series_equal(df_transformed["Weekday"], expected_weekdays, check_dtype=False)
 
