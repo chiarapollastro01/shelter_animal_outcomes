@@ -5,6 +5,7 @@ Unit tests for the preprocessing module.
 import numpy as np
 import pandas as pd
 from src.preprocessing import extract_age_in_days, DataCleaner
+from src.preprocessing import TemporalFeaturesExtractor
 
 # =====================================================================
 #                      AGE EXTRACTION TESTS
@@ -221,4 +222,159 @@ def test_datacleaner_all_nan():
     df_clean = DataCleaner().clean_data(df_mock)
 
     pd.testing.assert_frame_equal(df_clean, expected)
+
+
+# =====================================================================
+#                 TEMPORAL FEATURES EXTRACTOR TESTS
+# =====================================================================
+def test_temporal_basic_integer_extraction():
+    """Verify that basic integer temporal units (Hour and Weekday) are correctly
+      extracted.
+
+    GIVEN: a DataFrame with a DateTime column and custom non-default indices
+    WHEN: the transform method of TemporalFeaturesExtractor is executed
+    THEN: the integer Hour and Weekday columns are correctly extracted,
+    preserving the original index
+    """
+    df_mock = pd.DataFrame(
+        {"DateTime": ["2026-01-01 12:00:00", "2026-01-03 23:00:00"]},
+        index=[101, 102],
+    )
+    # name attributes are set to match the expected output of the transform method, which assigns names to the new columns based on their content.
+    expected_hours = pd.Series([12, 23], index=[101, 102], name="Hour")
+    expected_weekdays = pd.Series(
+        [3, 5], index=[101, 102], name="Weekday"
+    ) 
+
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+
+    pd.testing.assert_series_equal(df_transformed["Hour"], expected_hours, check_dtype=False)
+    pd.testing.assert_series_equal(df_transformed["Weekday"], expected_weekdays, check_dtype=False)
+
+
+
+def test_temporal_cyclic_hours():
+    """Verify the mathematical correctness of sine and cosine transformations
+
+    for hours.
+
+    GIVEN: a DataFrame with specific hours representing midnight, 6 AM, and noon
+    WHEN: the transform method of TemporalFeaturesExtractor is executed
+    THEN: Hour_sin and Hour_cos calculate accurate circular representations,
+    preserving the index
+    """
+    df_mock = pd.DataFrame(
+        {
+            "DateTime": [
+                "2026-01-01 00:00:00",
+                "2026-01-01 06:00:00",
+                "2026-01-01 12:00:00",
+            ]
+        },
+        index=[10, 20, 30],
+    )
+ 
+    expected_sin = pd.Series([0.0, 1.0, 0.0], index=[10, 20, 30], name="Hour_sin")
+    expected_cos = pd.Series(
+        [1.0, 0.0, -1.0], index=[10, 20, 30], name="Hour_cos"
+    )
+
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+
+    # assert_series_equal is used to compare the transformed DataFrame's Hour_sin and Hour_cos columns against the expected values, allowing for a small 
+    # numerical tolerance due to potential floating-point precision issues in trigonometric calculations.
+    pd.testing.assert_series_equal(
+        df_transformed["Hour_sin"], expected_sin, check_exact=False, atol=1e-7
+    )
+ 
+    pd.testing.assert_series_equal(
+        df_transformed["Hour_cos"], expected_cos, check_exact=False, atol=1e-7
+    )
+
+def test_temporal_cyclic_weekdays():
+    """Verify the mathematical correctness of sine and cosine transformations
+
+    for weekdays.
+
+    GIVEN: a DataFrame containing a Monday (day 0) and a Sunday (day 6)
+    WHEN: the transform method of TemporalFeaturesExtractor is executed
+    THEN: Wday_sin and Wday_cos calculate accurate cyclic values, preserving
+    the index
+    """
+    df_mock = pd.DataFrame(
+        {"DateTime": ["2026-07-06", "2026-07-12"]}, index=[15, 25]
+    )  # Lunedì, Domenica
+    expected_sin = pd.Series(
+        np.sin(2 * np.pi * np.array([0, 6]) / 7),
+        index=[15, 25],
+        name="Wday_sin",
+    )
+    expected_cos = pd.Series(
+        np.cos(2 * np.pi * np.array([0, 6]) / 7),
+        index=[15, 25],
+        name="Wday_cos",
+    )
+
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+
+    pd.testing.assert_series_equal(
+        df_transformed["Wday_sin"], expected_sin, check_exact=False, atol=1e-7
+    )
+    pd.testing.assert_series_equal(
+        df_transformed["Wday_cos"], expected_cos, check_exact=False, atol=1e-7
+    )
+
+
+def test_temporal_cyclic_day_of_year():
+    """Verify the mathematical correctness of sine and cosine transformations
+
+    for the day of the year.
+
+    GIVEN: a DataFrame containing dates representing Day of Year 1 (Jan 1) and
+    100 (Apr 10) in a non-leap year
+    WHEN: the transform method of TemporalFeaturesExtractor is executed
+    THEN: DoY_sin and DoY_cos columns are computed accurately, preserving the
+    index
+    """
+    df_mock = pd.DataFrame(
+        {"DateTime": ["2026-01-01", "2026-04-10"]}, index=[11, 22]
+    )
+    expected_sin = pd.Series(
+        np.sin(2 * np.pi * np.array([1, 100]) / 365.25),
+        index=[11, 22],
+        name="DoY_sin",
+    )
+    expected_cos = pd.Series(
+        np.cos(2 * np.pi * np.array([1, 100]) / 365.25),
+        index=[11, 22],
+        name="DoY_cos",
+    )
+
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+
+    pd.testing.assert_series_equal(
+        df_transformed["DoY_sin"], expected_sin, check_exact=False, atol=1e-7
+    )
+    pd.testing.assert_series_equal(
+        df_transformed["DoY_cos"], expected_cos, check_exact=False, atol=1e-7
+    )
+
+
+def test_temporal_missing_datetime_column():
+    """Verify that the transformer returns the DataFrame unchanged when the
+
+    specified datetime column is missing.
+
+    GIVEN: a DataFrame that does not contain the target DateTime column
+    WHEN: the transform method is executed
+    THEN: the input DataFrame is returned completely unmodified, preserving
+    indices and values
+    """
+    df_mock = pd.DataFrame({"Name": ["Bella", "Max"]}, index=[100, 200])
+
+    df_transformed = TemporalFeaturesExtractor(datetime_col="DateTime").transform(
+        df_mock
+    )
+
+    pd.testing.assert_frame_equal(df_transformed, df_mock)
 
