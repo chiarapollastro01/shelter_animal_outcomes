@@ -105,54 +105,21 @@ class DataCleaner:
 
 
 class TemporalFeaturesExtractor:
-    """Extractor class for temporal and cyclic features from the DateTime column.
-
-    This class converts the 'DateTime' column into a datetime object, generates
-    cyclic representations (sine/cosine) for hours, weekdays, and days of the
-    year.
-    """
+    """Base class for extracting raw temporal units from DateTime."""
 
     def __init__(self, datetime_col: str = "DateTime"):
-        """Initialize the extractor with the name of the datetime column."""
         self.datetime_col = datetime_col
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Extract temporal and cyclic features from the specified datetime
-          column.
-        """
-        df_out = df.copy()
-
-        # If the specified datetime column is not present in the DataFrame, return the DataFrame unchanged.
-        if self.datetime_col not in df_out.columns:
+         df_out = df.copy()
+         if self.datetime_col not in df_out.columns:
             return df_out
 
-        # 1. Converting to datetime format to ensure proper extraction of features.
-        df_out[self.datetime_col] = pd.to_datetime(df_out[self.datetime_col])
-        dt_series = df_out[self.datetime_col]
+         df_out[self.datetime_col] = pd.to_datetime(df_out[self.datetime_col])
+         dt_series = df_out[self.datetime_col]
 
-        # 2. In order to capture the cyclic nature of hours in a day, we use sine and cosine transformations. 
-        # This allows machine learning models to understand that 23:00 and 00:00 are close in time, despite their numerical difference.
-        hours = dt_series.dt.hour
-        df_out["Hour"] = hours
-        df_out["Hour_sin"] = np.sin(2 * np.pi * hours / 24)
-        df_out["Hour_cos"] = np.cos(2 * np.pi * hours / 24)
+        
+         df_out["Hour"] = dt_series.dt.hour
+         df_out["Weekday"] = dt_series.dt.dayofweek
 
-        # 3. To capture the cyclic nature of weekdays, we again use sine and cosine transformations. This ensures that models understand the proximity of days in a week, e.g., Sunday and Monday.
-        weekday = dt_series.dt.dayofweek  # Monday=0, Sunday=6
-        df_out["Weekday"] = weekday
-        df_out["Wday_sin"] = np.sin(2 * np.pi * weekday / 7)
-        df_out["Wday_cos"] = np.cos(2 * np.pi * weekday / 7)
-
-        # 4. To capture the cyclic nature of days in a year, we use sine and cosine transformations based on the day of the year. This is particularly useful for capturing seasonal patterns in the data.
-        doy = dt_series.dt.dayofyear
-        df_out["DoY_sin"] = np.sin(2 * np.pi * doy / 365.25)
-        df_out["DoY_cos"] = np.cos(2 * np.pi * doy / 365.25)
-
-
-        return df_out
-    
-
-
-
-
-    #TODO: outliers for age + breed + color. visual representation of daytime feature + the ones that are missing like sex (maybe after/during feature eng.). 
+         return df_out
