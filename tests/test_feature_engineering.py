@@ -1,8 +1,15 @@
 import numpy as np
 import pandas as pd
-from src.feature_engineering import AdvancedTemporalFeaturesExtractor
-
-
+from src.feature_engineering import (
+    AdvancedTemporalFeaturesExtractor,
+    CategoricalFeaturesEngineer,
+    RareCategoriesGrouper,
+    extract_primary_breed,
+    extract_primary_color,
+)
+# =====================================================================
+#                       TEMPORAL FEATURE
+# =====================================================================
 def test_temporal_weekend_boundaries():
     """Verify that IsWeekend correctly identifies the weekday/weekend boundary.
 
@@ -136,3 +143,158 @@ def test_advanced_temporal_missing_parent_columns_failsafe():
     df_transformed = AdvancedTemporalFeaturesExtractor(datetime_col="MissingDateTime").transform(df_mock)
 
     pd.testing.assert_frame_equal(df_transformed, df_mock)
+
+
+# =====================================================================
+#                           COLOR AND BREED 
+# =====================================================================
+
+
+def test_extract_primary_color_logic():
+    """Verify that only the primary color is extracted by splitting on '/'.
+
+    GIVEN: a Series containing bicolor entries ('Black/White'), tricolor entries
+           ('Brown Tabby/White'), and solid colors ('Blue') with custom indices
+    WHEN: extract_primary_color is executed
+    THEN: only the first color before the slash is kept, removing trailing
+    spaces,
+          preserving the original index
+    """
+
+    color_series = pd.Series(
+        ["Black/White", "Brown Tabby/White", "Blue"], index=[10, 20, 30]
+    )
+    expected = pd.Series(["Black", "Brown Tabby", "Blue"], index=[10, 20, 30])
+
+    result = extract_primary_color(color_series)
+
+
+    pd.testing.assert_series_equal(result, expected)
+
+
+def test_extract_primary_breed_logic():
+    """Verify that the primary breed is correctly extracted by splitting '/' and
+
+    stripping 'Mix'.
+
+    GIVEN: a Series containing crossbreeds with slashes, 'Mix' suffixes, and
+    purebreds,
+           with custom indices
+    WHEN: extract_primary_breed is executed
+    THEN: the 'Mix' keyword and second breeds are removed, leaving only the
+    clean primary breed,
+          preserving the index
+    """
+   
+    breed_series = pd.Series(
+        [
+            "Labrador Retriever/German Shepherd",  
+            "Chihuahua Shorthair Mix",  
+            "Siamese",  
+        ],
+        index=[15, 25, 35],
+    )
+    expected = pd.Series(
+        ["Labrador Retriever", "Chihuahua Shorthair", "Siamese"],
+        index=[15, 25, 35],
+    )
+
+    result = extract_primary_breed(breed_series)
+
+    pd.testing.assert_series_equal(result, expected)
+
+
+def test_rare_categories_grouper_threshold():
+    """Verify that categories below the specified frequency threshold are
+
+    grouped into 'Other'.
+
+    GIVEN: a DataFrame with a categorical column where 'A' and 'B' represent 40%
+    each,
+           and 'C' represents 20% of the dataset
+    WHEN: fit and transform are sequentially executed with a threshold of 0.35
+    (35%)
+    THEN: 'C' is replaced with 'Other' because its frequency is below 35%,
+    preserving the index
+    """
+    
+    df_mock = pd.DataFrame(
+        {"Breed": ["A", "A", "B", "B", "C"]}, index=[10, 20, 30, 40, 50]
+    )
+    expected = pd.Series(
+        ["A", "A", "B", "B", "Other"], index=[10, 20, 30, 40, 50], name="Breed"
+    )
+
+    grouper = RareCategoriesGrouper(columns=["Breed"], threshold=0.35)
+    grouper.fit(df_mock)
+    df_clean = grouper.transform(df_mock)
+
+    pd.testing.assert_series_equal(df_clean["Breed"], expected)
+
+
+def test_rare_categories_grouper_preserves_nan():
+    """Verify that NaN values are untouched and not converted to the 'Other'
+
+    placeholder.
+
+    GIVEN: a DataFrame with a categorical column containing missing NaN values
+    WHEN: fit and transform are executed
+    THEN: NaN values remain as NaN, preventing them from being grouped into
+    'Other'
+    """
+
+    df_mock = pd.DataFrame(
+        {"Breed": ["A", "A", "B", "B", np.nan]}, index=[10, 20, 30, 40, 50]
+    )
+    expected = pd.Series(
+        ["A", "A", "B", "B", np.nan], index=[10, 20, 30, 40, 50], name="Breed"
+    )
+
+
+    grouper = RareCategoriesGrouper(columns=["Breed"], threshold=0.35)
+    grouper.fit(df_mock)
+    df_clean = grouper.transform(df_mock)
+
+    pd.testing.assert_series_equal(df_clean["Breed"], expected)
+
+
+def test_categorical_features_engineer_fit_transform():
+    """Verify that CategoricalFeaturesEngineer correctly extracts 'is_mix' and
+
+    groups rare labels.
+
+    GIVEN: a DataFrame with high-cardinality Breed and Color columns, with custom index
+           (threshold=0.35, so categories representing 20% are grouped into 'Other')
+    WHEN: fit and transform are sequentially executed
+    THEN: 'is_mix' is extracted, Breed and Color are converted to primary, and
+          rare categories are successfully grouped, preserving the index
+     """
+    df_mock = pd.DataFrame(
+        {
+            "Breed": ["A/B", "A Mix", "A", "A", "C", np.nan],
+            "Color": ["Black/White", "Black", "Black", "Black", "Blue", np.nan],
+        },
+        index=[10, 20, 30, 40, 50, 60],
+    )
+
+    expected_is_mix = pd.Series(
+        [1, 1, 0, 0, 0, 0], index=[10, 20, 30, 40, 50, 60], name="is_mix"
+    )
+    expected_breed = pd.Series(
+        ["A", "A", "A", "A", "Other", np.nan], index=[10, 20, 30, 40, 50, 60], name="Breed"
+    )
+    expected_color = pd.Series(
+        ["Black", "Black", "Black", "Black", "Other", np.nan],
+        index=[10, 20, 30, 40, 50, 60],
+        name="Color",
+    )
+
+    engineer = CategoricalFeaturesEngineer(
+        columns=["Breed", "Color"], threshold=0.35
+    )
+    df_clean = engineer.fit_transform(df_mock)
+
+    pd.testing.assert_series_equal(df_clean["is_mix"], expected_is_mix)
+    pd.testing.assert_series_equal(df_clean["Breed"], expected_breed)
+    pd.testing.assert_series_equal(df_clean["Color"], expected_color)
+
