@@ -101,10 +101,17 @@ class DataCleaner:
             df_clean["log_age_in_days"] = np.log1p(age_days)
             df_clean = df_clean.drop(columns=["AgeuponOutcome"])
 
+      # 5. Breed and Color imputation: even if in the dataset there's no missing value for those features,
+      # it's importanto to impute to make the model as general as possible
+        if "Breed" in df_clean.columns:
+            df_clean["Breed"] = df_clean["Breed"].fillna("Unknown")
+        if "Color" in df_clean.columns:
+            df_clean["Color"] = df_clean["Color"].fillna("Unknown")
+            
         return df_clean
 
 
-class TemporalFeaturesExtractor:
+class TemporalFeaturesExtractor: 
     """Base class for extracting raw temporal units from DateTime."""
 
     def __init__(self, datetime_col: str = "DateTime"):

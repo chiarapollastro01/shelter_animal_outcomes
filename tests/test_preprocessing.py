@@ -210,6 +210,29 @@ def test_datacleaner_age_log_transformation():
     pd.testing.assert_series_equal(df_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7)
 
 
+def test_datacleaner_breed_color_preventive_imputation():
+    """Verify that potential missing values in Breed and Color are preventively imputed with "Unknown".
+
+    GIVEN: a DataFrame containing missing values (NaN) in both Breed and Color columns,
+           with custom non-default indices
+    WHEN: clean_data is executed on DataCleaner
+    THEN: all missing values (NaN) in both columns are successfully replaced with "Unknown",
+          preserving the original index
+    """
+    df_mock = pd.DataFrame({
+        "Breed": ["Chihuahua Mix", np.nan],
+        "Color": [np.nan, "Black"]
+    }, index=[100, 200])
+    
+    expected_breed = pd.Series(["Chihuahua Mix", "Unknown"], index=[100, 200], name="Breed")
+    expected_color = pd.Series(["Unknown", "Black"], index=[100, 200], name="Color")
+  
+    df_clean = DataCleaner().clean_data(df_mock)
+
+    pd.testing.assert_series_equal(df_clean["Breed"], expected_breed)
+    pd.testing.assert_series_equal(df_clean["Color"], expected_color)
+
+
 def test_datacleaner_all_nan():
     """Verify DataCleaner behavior under extreme cases where all variables are NaN.
 
