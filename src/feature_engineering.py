@@ -174,3 +174,31 @@ class SexFeaturesExtractor(BaseEstimator, TransformerMixin):
         df_out = df_out.drop(columns=[self.sex_col])
 
         return df_out
+    
+
+class NameFeaturesExtractor(BaseEstimator, TransformerMixin):
+    """Feature extractor that converts the high-cardinality text column 'Name'
+       into a binary indicator 'has_name'.
+    """
+
+    def __init__(self, name_col: str = "Name"):
+        self.name_col = name_col
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Transform 'Name' into 'has_name', then drop the original column."""
+        df_out = df.copy()
+        if self.name_col not in df_out.columns:
+            return df_out
+
+        clean_name = (
+            df_out[self.name_col].fillna("").astype(str).str.strip()
+        )
+
+        df_out["has_name"] = (
+            (clean_name.str.len() > 0)
+            & (clean_name.str.lower() != "unknown")
+        ).astype(int)
+
+        df_out = df_out.drop(columns=[self.name_col])
+
+        return df_out

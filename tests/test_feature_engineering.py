@@ -6,7 +6,8 @@ from src.feature_engineering import (
     RareCategoriesGrouper,
     extract_primary_breed,
     extract_primary_color,
-    SexFeaturesExtractor
+    SexFeaturesExtractor,
+    NameFeaturesExtractor
 )
 # =====================================================================
 #                       TEMPORAL FEATURE
@@ -332,7 +333,7 @@ def test_sex_features_extractor_reproductive_status():
 
 
   
-def test_sex_features_extractor_missing_column_failsafe():
+def test_sex_features_extractor_missing_column():
     """Verify that SexFeaturesExtractor returns the DataFrame untouched when the target column is missing.
 
     GIVEN: a DataFrame that does not contain the required SexuponOutcome column,
@@ -347,5 +348,54 @@ def test_sex_features_extractor_missing_column_failsafe():
     df_transformed = SexFeaturesExtractor(sex_col="SexuponOutcome").transform(
         df_mock
     )
+
+    pd.testing.assert_frame_equal(df_transformed, df_mock)
+
+
+# =====================================================================
+#                         Name
+# =====================================================================
+def test_name_features_extractor_presence():
+    """Verify that NameFeaturesExtractor correctly creates 'has_name' and drops
+       the raw column.
+
+    GIVEN: a DataFrame with a Name column containing a valid name, whitespace,
+           NaN, and variations of "Unknown" with custom indices
+    WHEN: transform is executed on NameFeaturesExtractor
+    THEN: the raw Name column is dropped, and 'has_name' is 1 only for valid names
+          and 0 for empty/unknown entries, preserving the original index
+    """
+    # 1. GIVEN: Prepariamo l'input sporco con nomi validi, spazi, NaN e varianti di Unknown [2, 21]
+    df_mock = pd.DataFrame(
+        {"Name": ["Bella", "   ", np.nan, "Unknown", "UNKNOWN"]},
+        index=[10, 20, 30, 40, 50],
+    )
+    expected = pd.Series(
+        [1, 0, 0, 0, 0], index=[10, 20, 30, 40, 50], name="has_name"
+    )
+
+    df_transformed = NameFeaturesExtractor().transform(df_mock)
+
+
+    assert "Name" not in df_transformed.columns
+
+    pd.testing.assert_series_equal(
+        df_transformed["has_name"], expected, check_dtype=False
+    )
+
+
+def test_name_features_extractor_missing_column():
+    """Verify that NameFeaturesExtractor returns the DataFrame untouched when
+
+    the Name column is missing.
+
+    GIVEN: a DataFrame that does not contain the required Name column, with a
+    custom index
+    WHEN: transform is executed on NameFeaturesExtractor
+    THEN: the input DataFrame is returned completely unmodified, preserving values
+    """
+    df_mock = pd.DataFrame({"Age": [10, 20]}, index=[100, 200])
+
+    df_transformed = NameFeaturesExtractor(name_col="Name").transform(df_mock)
 
     pd.testing.assert_frame_equal(df_transformed, df_mock)
