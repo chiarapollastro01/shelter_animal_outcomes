@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from src.feature_engineering import (
     AdvancedTemporalFeaturesExtractor,
     CategoricalFeaturesEngineer,
@@ -131,7 +132,7 @@ def test_temporal_features_kitten_season_boundaries():
 
 
 
-def test_advanced_temporal_missing_parent_columns_failsafe():
+def test_advanced_temporal_missing_parent_columns():
     """Verify that AdvancedTemporalFeaturesExtractor exits early if base columns (Hour/Weekday) are missing.
 
     GIVEN: a DataFrame that bypasses the parent's datetime_col check but where 
@@ -205,21 +206,17 @@ def test_extract_primary_breed_logic():
 
     pd.testing.assert_series_equal(result, expected)
 
+def test_rare_categories_grouper_dynamic_preservation():
+    """Verify that categories are dynamically preserved to keep 'Other' below the max ratio.
 
-def test_rare_categories_grouper_threshold():
-    """Verify that categories below the specified frequency threshold are
-
-    grouped into 'Other'.
-
-    GIVEN: a DataFrame with a categorical column where 'A' and 'B' represent 40%
-    each,
-           and 'C' represents 20% of the dataset
-    WHEN: fit and transform are sequentially executed with a threshold of 0.35
-    (35%)
-    THEN: 'C' is replaced with 'Other' because its frequency is below 35%,
-    preserving the index
+    GIVEN: a DataFrame with a categorical column where 'A' and 'B' represent 40% each,
+           and 'C' represents 20% of the dataset, with custom indices
+    WHEN: fit and transform are sequentially executed with max_other_ratio=0.25 
+          (meaning we must keep at least 75% of the data)
+    THEN: 'A' and 'B' are preserved (covering 80% of the data), and 'C' is replaced 
+          with 'Other' (representing 20% of the data, which is safely below 25%), 
+          preserving the index
     """
-    
     df_mock = pd.DataFrame(
         {"Breed": ["A", "A", "B", "B", "C"]}, index=[10, 20, 30, 40, 50]
     )
@@ -227,7 +224,7 @@ def test_rare_categories_grouper_threshold():
         ["A", "A", "B", "B", "Other"], index=[10, 20, 30, 40, 50], name="Breed"
     )
 
-    grouper = RareCategoriesGrouper(columns=["Breed"], threshold=0.35)
+    grouper = RareCategoriesGrouper(columns=["Breed"], max_other_ratio=0.25)
     grouper.fit(df_mock)
     df_clean = grouper.transform(df_mock)
 
@@ -236,8 +233,7 @@ def test_rare_categories_grouper_threshold():
 
 def test_rare_categories_grouper_preserves_nan():
     """Verify that NaN values are untouched and not converted to the 'Other'
-
-    placeholder.
+       placeholder.
 
     GIVEN: a DataFrame with a categorical column containing missing NaN values
     WHEN: fit and transform are executed
@@ -253,20 +249,44 @@ def test_rare_categories_grouper_preserves_nan():
     )
 
 
-    grouper = RareCategoriesGrouper(columns=["Breed"], threshold=0.35)
+    grouper = RareCategoriesGrouper(columns=["Breed"], max_other_ratio=0.25)
     grouper.fit(df_mock)
     df_clean = grouper.transform(df_mock)
 
     pd.testing.assert_series_equal(df_clean["Breed"], expected)
 
 
+def test_rare_categories_grouper_emits_warning_on_drift():
+    """Verify that transform emits a RuntimeWarning when the proportion of
+       'Other' exceeds the configured max ratio due to data drift.
+
+    GIVEN: a trained grouper, and a new test dataset containing only rare
+    categories
+           (which will all be mapped to 'Other', resulting in 100% 'Other' ratio)
+    WHEN: transform is executed on the test dataset
+    THEN: a RuntimeWarning is correctly emitted, indicating a dataset shift
+    """
+    df_train = pd.DataFrame({"Breed": ["A"] * 90 + ["B"] * 10})
+
+    df_test = pd.DataFrame({"Breed": ["B"] * 100})
+
+
+    grouper = RareCategoriesGrouper(columns=["Breed"], max_other_ratio=0.15)
+    grouper.fit(df_train)
+
+    with pytest.warns(
+        RuntimeWarning, match="exceeds the configured max_other_ratio"
+    ):
+        grouper.transform(df_test)
+
+
+
 def test_categorical_features_engineer_fit_transform():
     """Verify that CategoricalFeaturesEngineer correctly extracts 'is_mix' and
+       groups rare labels.
 
-    groups rare labels.
-
-    GIVEN: a DataFrame with high-cardinality Breed and Color columns, with custom index
-           (threshold=0.35, so categories representing 20% are grouped into 'Other')
+    GIVEN: a DataFrame with Breed and Color columns, with custom index
+           (max_other_ratio=0.25)
     WHEN: fit and transform are sequentially executed
     THEN: 'is_mix' is extracted, Breed and Color are converted to primary, and
           rare categories are successfully grouped, preserving the index
@@ -292,13 +312,34 @@ def test_categorical_features_engineer_fit_transform():
     )
 
     engineer = CategoricalFeaturesEngineer(
-        columns=["Breed", "Color"], threshold=0.35
+        columns=["Breed", "Color"], max_other_ratio=0.25
     )
     df_clean = engineer.fit_transform(df_mock)
 
     pd.testing.assert_series_equal(df_clean["is_mix"], expected_is_mix)
     pd.testing.assert_series_equal(df_clean["Breed"], expected_breed)
     pd.testing.assert_series_equal(df_clean["Color"], expected_color)
+
+def test_categorical_features_engineer_missing_columns():
+    """Verify that CategoricalFeaturesEngineer returns the DataFrame untouched
+
+    when both Breed and Color columns are missing.
+
+    GIVEN: a DataFrame that lacks both 'Breed' and 'Color' target columns,
+           with a custom index
+    WHEN: fit_transform is executed on CategoricalFeaturesEngineer
+    THEN: the input DataFrame is returned completely unmodified, preserving its
+          index and values
+    """
+
+    df_mock = pd.DataFrame({"Name": ["Bella", "Max"]}, index=[100, 200])
+
+    engineer = CategoricalFeaturesEngineer(
+        columns=["Breed", "Color"], max_other_ratio=0.25
+    )
+    df_transformed = engineer.fit_transform(df_mock)
+
+    pd.testing.assert_frame_equal(df_transformed, df_mock)
 
 
 # =====================================================================

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
 from src.preprocessing import TemporalFeaturesExtractor
 
@@ -62,28 +63,38 @@ def extract_primary_breed(breed_series: pd.Series) -> pd.Series:
 class RareCategoriesGrouper(BaseEstimator, TransformerMixin):
     """Dynamic categorical grouper that solves high-cardinality issues.
 
-    Identifies frequent categories on training data and groups low-frequency
-    ones into 'Other', preventing data leakage during train/test splits.
+    Keeps the most frequent categories required to cover at least (1 -
+    max_other_ratio) of the dataset, grouping the remaining rare ones into
+    'Other'.
     """
 
-    def __init__(self, columns: list, threshold: float = 0.015):
-        """Initialize with target columns and a relative frequency threshold."""
+    def __init__(self, columns: list, max_other_ratio: float = 0.15):
+        """Initialize with target columns and the maximum allowed ratio for
+           'Other'."""
         self.columns = columns
-        self.threshold = threshold
+        self.max_other_ratio = max_other_ratio
         self.frequent_categories_ = {}
 
     def fit(self, X: pd.DataFrame, y=None):
-        """Identify frequent categories (above the threshold) from the training
-           data.
+        """Identify the minimal set of categories needed to meet the
+           information retention constraint.
         """
-        n_rows = len(X)
         for col in self.columns:
             if col in X.columns:
-                freqs = X[col].value_counts() / n_rows
-                self.frequent_categories_[col] = freqs[
-                    freqs >= self.threshold
+                
+                freqs = X[col].value_counts(normalize=True)
+
+                cum_sum = freqs.cumsum()
+
+                target_ratio = 1.0 - self.max_other_ratio
+
+                frequent = cum_sum[
+                    cum_sum.shift(fill_value=0) < target_ratio
                 ].index.tolist()
+
+                self.frequent_categories_[col] = frequent
         return self
+
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Replace rare categories in the specified columns with 'Other'."""
@@ -96,6 +107,14 @@ class RareCategoriesGrouper(BaseEstimator, TransformerMixin):
                     X_out[col],
                     "Other",
                 )
+
+                other_ratio = (X_out[col] == "Other").mean()
+                if other_ratio > self.max_other_ratio:
+                 warnings.warn(
+                    f"Column '{col}' has an 'Other' ratio of {other_ratio:.3f}, "
+                    f"which exceeds the configured max_other_ratio of {self.max_other_ratio:.3f}. ",
+                    RuntimeWarning,
+                )
         return X_out
 
 
@@ -106,10 +125,10 @@ class CategoricalFeaturesEngineer(BaseEstimator, TransformerMixin):
     and dynamically bins low-frequency categories to prevent overfitting.
     """
 
-    def __init__(self, columns: list = None, threshold: float = 0.015):
-        """Initialize with target columns and the grouping threshold."""
+    def __init__(self, columns: list = None, max_other_ratio: float = 0.15):
+        """Initialize with target columns and the information retention limit."""
         self.columns = columns if columns is not None else ["Breed", "Color"]
-        self.threshold = threshold
+        self.max_other_ratio = max_other_ratio
         self.grouper_ = None
 
     def fit(self, X: pd.DataFrame, y=None):
@@ -123,7 +142,7 @@ class CategoricalFeaturesEngineer(BaseEstimator, TransformerMixin):
             X_temp["Color"] = extract_primary_color(X_temp["Color"])
 
         self.grouper_ = RareCategoriesGrouper(
-            columns=self.columns, threshold=self.threshold
+            columns=self.columns, max_other_ratio=self.max_other_ratio
         )
         self.grouper_.fit(X_temp)
         return self
