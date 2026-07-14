@@ -135,7 +135,6 @@ class CategoricalFeaturesEngineer(BaseEstimator, TransformerMixin):
         """
         X_out = X.copy()
 
-        # 1. Estrazione del flag 'is_mix' prima che la colonna Breed venga alterata
         if "Breed" in X_out.columns:
             is_mix_series = X_out["Breed"].str.contains(
                 "Mix", na=False, case=False
@@ -151,3 +150,27 @@ class CategoricalFeaturesEngineer(BaseEstimator, TransformerMixin):
             X_out = self.grouper_.transform(X_out)
 
         return X_out
+    
+
+class SexFeaturesExtractor(BaseEstimator, TransformerMixin):
+    """Feature extractor focused solely on the highly predictive reproductive status."""
+
+    def __init__(self, sex_col: str = "SexuponOutcome"):
+        self.sex_col = sex_col
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        df_out = df.copy()
+        if self.sex_col not in df_out.columns:
+            return df_out
+
+        is_neutered = df_out[self.sex_col].str.contains("Neutered|Spayed", na=False, case=False)
+        is_intact = df_out[self.sex_col].str.contains("Intact", na=False, case=False)
+        
+        df_out["Reproductive_Status"] = np.where(
+            is_neutered, "Neutered/Spayed", 
+            np.where(is_intact, "Intact", "Unknown")
+        )
+
+        df_out = df_out.drop(columns=[self.sex_col])
+
+        return df_out

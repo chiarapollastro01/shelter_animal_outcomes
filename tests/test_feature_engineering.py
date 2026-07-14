@@ -6,6 +6,7 @@ from src.feature_engineering import (
     RareCategoriesGrouper,
     extract_primary_breed,
     extract_primary_color,
+    SexFeaturesExtractor
 )
 # =====================================================================
 #                       TEMPORAL FEATURE
@@ -298,3 +299,53 @@ def test_categorical_features_engineer_fit_transform():
     pd.testing.assert_series_equal(df_clean["Breed"], expected_breed)
     pd.testing.assert_series_equal(df_clean["Color"], expected_color)
 
+
+# =====================================================================
+#                         Sex
+# =====================================================================
+def test_sex_features_extractor_reproductive_status():
+    """Verify that SexFeaturesExtractor successfully extracts Reproductive_Status and drops the raw column.
+
+    GIVEN: a DataFrame with raw SexuponOutcome values containing neutered,
+           spayed, intact, unknown, and NaN entries, with a custom index
+    WHEN: transform is executed on SexFeaturesExtractor
+    THEN: the raw column is dropped and Reproductive_Status 
+          is accurately mapped, preserving the original index
+    """
+    df_mock = pd.DataFrame({
+        "SexuponOutcome": ["Neutered Male", "Spayed Female", "Intact Male", "Unknown", np.nan]
+    }, index=[10, 20, 30, 40, 50])
+    
+
+    expected = pd.Series(
+        ["Neutered/Spayed", "Neutered/Spayed", "Intact", "Unknown", "Unknown"],
+        index=[10, 20, 30, 40, 50],
+        name="Reproductive_Status"
+    )
+    
+
+    df_transformed = SexFeaturesExtractor().transform(df_mock)
+    
+    assert "SexuponOutcome" not in df_transformed.columns
+    
+    pd.testing.assert_series_equal(df_transformed["Reproductive_Status"], expected)
+
+
+  
+def test_sex_features_extractor_missing_column_failsafe():
+    """Verify that SexFeaturesExtractor returns the DataFrame untouched when the target column is missing.
+
+    GIVEN: a DataFrame that does not contain the required SexuponOutcome column,
+           with a custom index
+    WHEN: transform is executed on SexFeaturesExtractor
+    THEN: the input DataFrame is returned completely unmodified, preserving its
+          index and values
+    """
+  
+    df_mock = pd.DataFrame({"Name": ["Bella", "Max"]}, index=[100, 200])
+
+    df_transformed = SexFeaturesExtractor(sex_col="SexuponOutcome").transform(
+        df_mock
+    )
+
+    pd.testing.assert_frame_equal(df_transformed, df_mock)
