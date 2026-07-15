@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from src.feature_engineering import (
-    AdvancedTemporalFeaturesExtractor,
+    TemporalFeaturesExtractor,
     CategoricalFeaturesEngineer,
     RareCategoriesGrouper,
     extract_primary_breed,
@@ -10,21 +10,21 @@ from src.feature_engineering import (
     SexFeaturesExtractor,
     NameFeaturesExtractor
 )
+
+two_pi= 2* np.pi # GLOBAL CONSTANT
+
 # =====================================================================
 #                       TEMPORAL FEATURE
 # =====================================================================
-def test_advanced_temporal_weekend():
-    """Verify that IsWeekend correctly identifies the weekday/weekend boundary.
 
-    GIVEN: a DataFrame with explicit dates containing a Monday, a Friday, a
-    Saturday, and a Sunday under custom indices
-    WHEN: the transform method of
-    TemporalFeaturesExtractor is executed 
-    THEN: IsWeekend returns 0 for Monday
-    and Friday, and 1 for Saturday and Sunday,
-          preserving the custom index and successfully dropping the 'Weekday' column
+def test_temporal_extractor_success():
+    """Verify that TemporalFeaturesExtractor correctly extracts cyclic features and IsWeekend.
+
+    GIVEN: a DataFrame with raw string dates (Monday, Friday, Saturday, Sunday) and custom indices
+    WHEN: transform is executed
+    THEN: DateTime is dropped, IsWeekend is correctly assigned (0 for weekdays, 1 for weekends),
+          cyclic columns are created, and the original index is preserved
     """
-
     df_mock = pd.DataFrame(
         {
             "DateTime": [
@@ -36,64 +36,156 @@ def test_advanced_temporal_weekend():
         },
         index=[10, 20, 30, 40],
     )
-    expected = pd.Series([0, 0, 1, 1], index=[10, 20, 30, 40], name="IsWeekend")
+    expected_weekend = pd.Series([0.0, 0.0, 1.0, 1.0], index=[10, 20, 30, 40], name="IsWeekend")
+    expected_columns = {"Hour_sin", "Hour_cos", "Wday_sin", "Wday_cos", "DoY_sin", "DoY_cos", "IsWeekend"}
 
-    df_transformed = AdvancedTemporalFeaturesExtractor().transform(df_mock)
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
 
-    pd.testing.assert_series_equal(df_transformed["IsWeekend"], expected, check_dtype=False)
-    assert "Weekday" not in df_transformed.columns
+    assert "DateTime" not in df_transformed.columns
+    assert set(df_transformed.columns) == expected_columns
+
+    pd.testing.assert_series_equal(df_transformed["IsWeekend"], expected_weekend, check_dtype=False)
 
 
-def test_advanced_temporal_missing_columns():
-   """Verify that AdvancedTemporalFeaturesExtractor returns the DataFrame untouched when DateTime is missing.
+def test_temporal_cyclic_hours():
+   """Verify the mathematical correctness of sine and cosine transformations for hours.
 
-    GIVEN: a DataFrame that does not contain the required DateTime column, with a custom index
-    WHEN: transform is executed on the subclass
-    THEN: the transform method exits early, returning the DataFrame completely unmodified,
-          preserving index and values (implicitly testing both parent and child early exits) [11]
+    GIVEN: a DataFrame with precise timestamps representing Midnight (hour 0), 6 AM (hour 6), and Noon (hour 12)
+           and a custom non-default index
+    WHEN: the transform method of TemporalFeaturesExtractor is executed
+    THEN: Hour_sin and Hour_cos calculate accurate values at boundaries (0, pi/2, pi) respectively,
+          preserving the original index and handling float precision tolerances
     """
-
-   df_mock = pd.DataFrame({"Name": ["Bella", "Max"]}, index=[100, 200])
-
-   df_transformed = AdvancedTemporalFeaturesExtractor(datetime_col="MissingDateTime").transform(df_mock)
-
-   pd.testing.assert_frame_equal(df_transformed, df_mock)
-
-
-def test_advanced_temporal_handles_null_values():
-    """Verify that missing date values safely propagate as NaN.
-
-    GIVEN: a DataFrame containing a valid weekend date and a missing (None) date
-    WHEN: transform is executed on AdvancedTemporalFeaturesExtractor
-    THEN: the valid date is calculated correctly, and the missing date propagates as NaN in IsWeekend
-    """
-    df_mock = pd.DataFrame(
-        {"DateTime": ["2026-07-12 12:00:00", None]}, 
-        index=[101, 102]
+   df_mock = pd.DataFrame({
+            "DateTime": [
+                "2026-01-01 00:00:00",  
+                "2026-01-01 06:00:00",  
+                "2026-01-01 12:00:00", 
+            ]
+        },
+        index=[11, 22, 33],
     )
+   expected_sin = pd.Series(np.sin(two_pi * np.array([0, 6, 12]) / 24), index=[11, 22, 33], name="Hour_sin")
+   expected_cos = pd.Series(np.cos(two_pi* np.array([0, 6, 12]) / 24), index=[11, 22, 33], name="Hour_cos")
+
+   df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+
+   pd.testing.assert_series_equal(df_transformed["Hour_sin"], expected_sin, check_exact=False, atol=1e-7)
+   pd.testing.assert_series_equal(df_transformed["Hour_cos"], expected_cos, check_exact=False, atol=1e-7)
+
+
+def test_temporal_cyclic_weekdays():
+     """Verify the mathematical correctness of sine and cosine transformations for weekdays.
+
+    GIVEN: a DataFrame containing a Monday (weekday 0) and a Sunday (weekday 6) with custom non-default indices
+    WHEN: the transform method of TemporalFeaturesExtractor is executed
+    THEN: Wday_sin and Wday_cos are computed accurately based on the weekday, preserving the index
+          and handling float precision tolerances
+    """
+     df_mock = pd.DataFrame({"DateTime": ["2026-07-06", "2026-07-12"]}, index=[15, 25])  # Lunedì, Domenica
+     expected_sin = pd.Series(np.sin(two_pi * np.array([0, 6]) / 7), index=[15, 25], name="Wday_sin")
+     expected_cos = pd.Series(np.cos(two_pi * np.array([0, 6]) / 7), index=[15, 25], name="Wday_cos")
+
+     df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+
+     pd.testing.assert_series_equal(df_transformed["Wday_sin"], expected_sin, check_exact=False, atol=1e-7)
+     pd.testing.assert_series_equal(df_transformed["Wday_cos"], expected_cos, check_exact=False, atol=1e-7)
+
+
+def test_temporal_cyclic_day_of_year():
+    """Verify the mathematical correctness of sine and cosine transformations for the day of the year.
+
+    GIVEN: a DataFrame containing dates representing Day of Year 1 (Jan 1) and 100 (Apr 10) in a non-leap year (2026),
+           with custom non-default indices
+    WHEN: the transform method of TemporalFeaturesExtractor is executed
+    THEN: DoY_sin and DoY_cos columns are computed accurately based on the day of the year, preserving the index
+          and handling float precision tolerances
+    """
+    df_mock = pd.DataFrame({"DateTime": ["2026-01-01", "2026-04-10"]}, index=[11, 22])
+    expected_sin = pd.Series(np.sin(two_pi * np.array([1, 100]) / 365.25), index=[11, 22], name="DoY_sin")
+    expected_cos = pd.Series(np.cos(two_pi * np.array([1, 100]) / 365.25), index=[11, 22], name="DoY_cos")
+
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+
+    pd.testing.assert_series_equal(df_transformed["DoY_sin"], expected_sin, check_exact=False, atol=1e-7)
+    pd.testing.assert_series_equal(df_transformed["DoY_cos"], expected_cos, check_exact=False, atol=1e-7)
+
+
+
+def test_temporal_extractor_already_datetime_type():
+    """Verify that the transformer produces identical values regardless of whether the input is raw string or datetime64.
+
+    GIVEN: two identical DataFrames, one with raw string dates and one pre-converted to datetime64[ns]
+    WHEN: transform is executed on both
+    THEN: both executions succeed, producing perfectly identical DataFrames in both schema and values, 
+          preserving the index and dropping DateTime
+    """
+    df_strings = pd.DataFrame({"DateTime": ["2026-07-06 12:00:00"]}, index=[99])
+    df_datetime = pd.DataFrame({"DateTime": pd.to_datetime(["2026-07-06 12:00:00"])}, index=[99])
     
-    df_transformed = AdvancedTemporalFeaturesExtractor().transform(df_mock)
+    res_strings = TemporalFeaturesExtractor().transform(df_strings)
+    res_datetime = TemporalFeaturesExtractor().transform(df_datetime)
+    
+    pd.testing.assert_frame_equal(res_strings, res_datetime)
+
+
+def test_temporal_extractor_empty_dataframe_with_columns():
+    """Verify that an empty DataFrame with the target column is processed safely without crashing.
+
+    GIVEN: an empty DataFrame with only the DateTime column in its schema
+    WHEN: transform is executed on TemporalFeaturesExtractor
+    THEN: the returned DataFrame is empty, DateTime is dropped, and the expected empty schema is preserved
+    """
+    df_mock = pd.DataFrame(columns=["DateTime"])
+
+    expected_cols = {"IsWeekend", "Hour_sin", "Hour_cos", "Wday_sin", "Wday_cos", "DoY_sin", "DoY_cos"}
+    
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+    
+    assert df_transformed.empty
+    assert set(df_transformed.columns) == expected_cols
+
+def test_temporal_extractor_handles_null_values():
+    """Verify that missing or invalid date values do not crash the execution and propagate as NaN.
+
+    GIVEN: a DataFrame with a valid DateTime and a None value, under custom indices
+    WHEN: transform is executed on TemporalFeaturesExtractor
+    THEN: the valid date is calculated, and the missing value safely propagates as NaN in the cyclic columns
+    """
+    df_mock = pd.DataFrame({"DateTime": ["2026-07-12 12:00:00", None]}, index=[101, 102])
+    
+    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
     
 
+    assert not np.isnan(df_transformed["Hour_sin"].loc[101])
+
+    assert np.isnan(df_transformed["Hour_sin"].loc[102])
+    assert np.isnan(df_transformed["Wday_cos"].loc[102])
+    assert np.isnan(df_transformed["DoY_sin"].loc[102])
+    
     assert df_transformed["IsWeekend"].loc[101] == 1.0
     assert np.isnan(df_transformed["IsWeekend"].loc[102])
 
 
-def test_advanced_temporal_empty_dataframe_with_columns():
-    """Verify that an empty DataFrame with the target column preserves the schema without crashing.
 
-    GIVEN: an empty DataFrame that contains only the DateTime column in its schema
-    WHEN: transform is executed on AdvancedTemporalFeaturesExtractor
-    THEN: the returned DataFrame is empty, Weekday is absent, and IsWeekend is present in the schema
+def test_temporal_base_extractor_missing_column():
+    """Verify that the base transformer returns the DataFrame unchanged when
+    the target column is missing.
+
+    GIVEN: a DataFrame that lacks the specified target DateTime column, with a
+    custom index
+    WHEN: the transform method is executed
+    THEN: the input DataFrame is returned completely unmodified, preserving its
+    index and values
     """
-    df_mock = pd.DataFrame(columns=["DateTime"])
-    
-    df_transformed = AdvancedTemporalFeaturesExtractor().transform(df_mock)
-    
-    assert df_transformed.empty
-    assert "IsWeekend" in df_transformed.columns
-    assert "Weekday" not in df_transformed.columns
 
+    df_mock = pd.DataFrame({"Name": ["Bella", "Max"]}, index=[100, 200])
+
+    df_transformed = TemporalFeaturesExtractor(datetime_col="DateTime").transform(
+        df_mock
+    )
+
+    pd.testing.assert_frame_equal(df_transformed, df_mock)
 
 # =====================================================================
 #                           COLOR AND BREED 

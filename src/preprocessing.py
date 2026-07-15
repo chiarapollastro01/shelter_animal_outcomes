@@ -109,35 +109,3 @@ class DataCleaner:
             df_clean["Color"] = df_clean["Color"].fillna("Unknown")
             
         return df_clean
-
-
-class TemporalFeaturesExtractor:
-    """Base class for extracting raw and cyclic temporal units from DateTime."""
-
-    def __init__(self, datetime_col: str = "DateTime"):
-        self.datetime_col = datetime_col
-
-    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        df_out = df.copy()
-        if self.datetime_col not in df_out.columns:
-            return df_out
-
-        df_out[self.datetime_col] = pd.to_datetime(df_out[self.datetime_col])
-        dt_series = df_out[self.datetime_col]
-
-        hours = dt_series.dt.hour
-        df_out["Hour_sin"] = np.sin(2 * np.pi * hours / 24)
-        df_out["Hour_cos"] = np.cos(2 * np.pi * hours / 24)
-
-        weekday = dt_series.dt.dayofweek
-        df_out["Weekday"] = weekday
-        df_out["Wday_sin"] = np.sin(2 * np.pi * weekday / 7)
-        df_out["Wday_cos"] = np.cos(2 * np.pi * weekday / 7)
-
-        doy = dt_series.dt.dayofyear
-        df_out["DoY_sin"] = np.sin(2 * np.pi * doy / 365.25)
-        df_out["DoY_cos"] = np.cos(2 * np.pi * doy / 365.25)
-
-        df_out = df_out.drop(columns=[self.datetime_col])
-
-        return df_out

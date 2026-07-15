@@ -2,29 +2,46 @@ import numpy as np
 import pandas as pd
 import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
-from src.preprocessing import TemporalFeaturesExtractor
 
+import numpy as np
+import pandas as pd
 
+class TemporalFeaturesExtractor:
+    """Extracts cyclic and high-level operational temporal features from DateTime."""
 
-class AdvancedTemporalFeaturesExtractor(TemporalFeaturesExtractor):
-     """Advanced temporal feature engineer for the shelter dataset.
-    Inherits base temporal extractions from TemporalFeaturesExtractor and appends
-    the high-level operational feature IsWeekend, dropping intermediate columns.
-    """
+    def __init__(self, datetime_col: str = "DateTime"):
+        self.datetime_col = datetime_col
 
-     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        df_out = super().transform(df)
-
-        if "Weekday" not in df_out.columns:
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        df_out = df.copy()
+        two_pi=2 * np.pi
+        if self.datetime_col not in df_out.columns:
             return df_out
 
+        df_out[self.datetime_col] = pd.to_datetime(df_out[self.datetime_col])
+        dt_series = df_out[self.datetime_col]
+
+        hours = dt_series.dt.hour
+        df_out["Hour_sin"] = np.sin(two_pi * hours / 24)
+        df_out["Hour_cos"] = np.cos(two_pi * hours / 24)
+
+        weekday = dt_series.dt.dayofweek
+        df_out["Wday_sin"] = np.sin(two_pi * weekday / 7)
+        df_out["Wday_cos"] = np.cos(two_pi * weekday / 7)
+
+
         df_out["IsWeekend"] = np.where(
-            df_out["Weekday"].isna(),
+            weekday.isna(),
             np.nan,
-            (df_out["Weekday"] >= 5).astype(float)
+            (weekday >= 5).astype(float)
         )
 
-        df_out = df_out.drop(columns=["Weekday"])
+        doy = dt_series.dt.dayofyear
+        df_out["DoY_sin"] = np.sin(two_pi * doy / 365.25)
+        df_out["DoY_cos"] = np.cos(two_pi * doy / 365.25)
+
+        df_out = df_out.drop(columns=[self.datetime_col])
+
         return df_out
 
 
