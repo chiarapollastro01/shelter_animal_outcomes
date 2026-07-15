@@ -45,7 +45,7 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     # The NaN values will remain NaN because a number multiplied by NaN is NaN.
     return numeric_values * multipliers
  
-
+#REMEMBER TO FIX DATA LEAKAGE IN IMPUTATION!!! + ALL NAN CASE FOR AGE
 class DataCleaner:
     """
     Initial class for cleaning the Shelter Animal Outcomes dataset.
@@ -81,9 +81,9 @@ class DataCleaner:
         
         # 3. Sex imputation: categorical variable with only 1 missing value, so it's best to use the mode for imputation
         if "SexuponOutcome" in df_clean.columns:
-                modes = df_clean["SexuponOutcome"].mode()
-                mode_sex = modes[0] if not modes.empty else "Unknown"
-                df_clean["SexuponOutcome"] = df_clean["SexuponOutcome"].fillna(
+            modes = df_clean["SexuponOutcome"].mode()
+            mode_sex = modes[0] if not modes.empty else "Unknown"
+            df_clean["SexuponOutcome"] = df_clean["SexuponOutcome"].fillna(
                     mode_sex
                 )
 
@@ -102,7 +102,7 @@ class DataCleaner:
             df_clean = df_clean.drop(columns=["AgeuponOutcome"])
 
       # 5. Breed and Color imputation: even if in the dataset there's no missing value for those features,
-      # it's importanto to impute to make the model as general as possible
+      # it's important to impute to make the model as general as possible
         if "Breed" in df_clean.columns:
             df_clean["Breed"] = df_clean["Breed"].fillna("Unknown")
         if "Color" in df_clean.columns:
@@ -111,22 +111,33 @@ class DataCleaner:
         return df_clean
 
 
-class TemporalFeaturesExtractor: 
-    """Base class for extracting raw temporal units from DateTime."""
+class TemporalFeaturesExtractor:
+    """Base class for extracting raw and cyclic temporal units from DateTime."""
 
     def __init__(self, datetime_col: str = "DateTime"):
         self.datetime_col = datetime_col
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-         df_out = df.copy()
-         if self.datetime_col not in df_out.columns:
+        df_out = df.copy()
+        if self.datetime_col not in df_out.columns:
             return df_out
 
-         df_out[self.datetime_col] = pd.to_datetime(df_out[self.datetime_col])
-         dt_series = df_out[self.datetime_col]
+        df_out[self.datetime_col] = pd.to_datetime(df_out[self.datetime_col])
+        dt_series = df_out[self.datetime_col]
 
-        
-         df_out["Hour"] = dt_series.dt.hour
-         df_out["Weekday"] = dt_series.dt.dayofweek
+        hours = dt_series.dt.hour
+        df_out["Hour_sin"] = np.sin(2 * np.pi * hours / 24)
+        df_out["Hour_cos"] = np.cos(2 * np.pi * hours / 24)
 
-         return df_out
+        weekday = dt_series.dt.dayofweek
+        df_out["Weekday"] = weekday
+        df_out["Wday_sin"] = np.sin(2 * np.pi * weekday / 7)
+        df_out["Wday_cos"] = np.cos(2 * np.pi * weekday / 7)
+
+        doy = dt_series.dt.dayofyear
+        df_out["DoY_sin"] = np.sin(2 * np.pi * doy / 365.25)
+        df_out["DoY_cos"] = np.cos(2 * np.pi * doy / 365.25)
+
+        df_out = df_out.drop(columns=[self.datetime_col])
+
+        return df_out
