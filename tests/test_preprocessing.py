@@ -1,47 +1,69 @@
 """
-Unit tests for the preprocessing module.
+Unit tests for the preprocessing module (extract_age_in_days, DataCleaner).
 
 """
+import logging
 import numpy as np
+import pytest
 import pandas as pd
 from src.preprocessing import extract_age_in_days, DataCleaner
+
+# =====================================================================
+#                              FIXTURES 
+# =====================================================================
+
+@pytest.fixture
+def train_df() -> pd.DataFrame:
+    """Training frame with known statistics: sex mode = 'Neutered Male',
+    median age = 730 days. Covers every column the cleaner touches."""
+    return pd.DataFrame(
+        {
+            "AnimalID": ["A1", "A2", "A3", "A4"],
+            "OutcomeSubtype": ["Partner", "Foster", "Partner", "Foster"],
+            "Name": ["Bella", np.nan, "Luna", "Max"],
+            "Breed": ["Chihuahua Mix", np.nan, "Beagle", "Beagle"],
+            "Color": [np.nan, "Black", "White", "Black"],
+            "SexuponOutcome": ["Neutered Male", "Neutered Male", "Intact Female", np.nan],
+            "AgeuponOutcome": ["1 year", "2 years", "3 years", np.nan],
+        },
+        index=[10, 20, 30, 40],
+    )
+
+
+@pytest.fixture
+def fitted_cleaner(train_df: pd.DataFrame) -> DataCleaner:
+    """A DataCleaner already fitted on the training fixture."""
+    return DataCleaner().fit(train_df)
 
 # =====================================================================
 #                      AGE EXTRACTION TESTS
 # =====================================================================
 
-# CONTROL THESE TESTS!!!
-
-
 def test_extract_age_typical_cases():
     """
-    Test the conversion of typical age strings with standard units.
-
-    GIVEN: a pandas Series with well-formatted, lowercase age strings (years, months, weeks, days)
+    GIVEN: a pandas Series with well-formatted, lowercase age strings (years, months, weeks, days) with custom indices
     WHEN: the extract_age_in_days function is executed
-    THEN: the numeric values are correctly converted to float days
+    THEN: the numeric values are correctly converted to float days and the index is preserved
     """
-    age_series = pd.Series(["1 year", "2 months", "3 weeks", "5 days"])
+    age_series = pd.Series(["1 year", "2 months", "3 weeks", "5 days"], index=[101, 102, 103, 104])
     
-    expected = pd.Series([365.0, 60.0, 21.0, 5.0])
+    expected = pd.Series([365.0, 60.0, 21.0, 5.0], index=[101, 102, 103, 104])
     
     result = extract_age_in_days(age_series)
-    # check_names=False is used to ignore the name of the Series during comparison, as the function does not set a name for the output Series.
-    # We are indeed only interested in the values and their order, not the name of the Series.
+
+        # check_names=False: the function does not set a name on the output Series
     pd.testing.assert_series_equal(result, expected, check_names=False)
   
 
 def test_extract_age_formatting_variations():
     """
-    Test that the function can handle case variations and spacing around text.
-
-    GIVEN: a Series with uppercase units, singular terms, and leading/trailing spaces
+    GIVEN: a Series with uppercase units, singular terms, and leading/trailing spaces with custom indices
     WHEN: the extract_age_in_days function is executed
-    THEN: values are parsed correctly, ignoring case and surrounding spacing
+    THEN: values are parsed correctly, ignoring case and surrounding spacing, preserving the index
     """
-    age_series = pd.Series(["1 YEAR", "  2 months  ", "1 day", "10 DAYS"])
+    age_series = pd.Series(["1 YEAR", "  2 months  ", "1 day", "10 DAYS"], index=[10, 20, 30, 40])
 
-    expected = pd.Series([365.0, 60.0, 1.0, 10.0])
+    expected = pd.Series([365.0, 60.0, 1.0, 10.0], index=[10, 20, 30, 40])
     
     result = extract_age_in_days(age_series)
     
@@ -50,14 +72,12 @@ def test_extract_age_formatting_variations():
 
 def test_extract_age_invalid_and_null_inputs():
     """
-    Test how the function handles unparseable text and singular null values.
-
-    GIVEN: a Series containing a missing value (NaN) and an unparseable string ("Unknown")
+    GIVEN: a Series containing a missing value (NaN), an unparseable string ("Unknown") and a number with an invalid unit, with custom indices
     WHEN: the extract_age_in_days function is executed
-    THEN: both the NaN and the unparseable input return NaN
+    THEN: all inputs safely resolve to NaN without breaking the execution, preserving the index
     """
-    age_series = pd.Series([np.nan, "Unknown"])
-    expected = pd.Series([np.nan, np.nan])
+    age_series = pd.Series([np.nan, "Unknown", "5 units"], index=[7,8,9])
+    expected = pd.Series([np.nan, np.nan, np.nan], index=[7,8,9])
     
     result = extract_age_in_days(age_series)
     
@@ -66,13 +86,11 @@ def test_extract_age_invalid_and_null_inputs():
 
 def test_extract_age_all_null_series():
     """
-    Test the specific branch optimization where the entire input Series is null.
 
-    GIVEN: a Series where all elements are NaN
+    GIVEN: a Series where all elements are NaN with custom indeces (early-return branch)
     WHEN: the extract_age_in_days function is executed
-    THEN: it returns a Series of the same length containing NaN with a float dtype
+    THEN: it returns a Series of the same length containing NaN with a float dtype, preserving the index
     """
-    # Indexes are intentionally non-sequential to ensure the function preserves the original index.
     age_series = pd.Series([np.nan, np.nan], index=[10, 20])
     expected = pd.Series([np.nan, np.nan], index=[10, 20], dtype=float)
     
@@ -80,126 +98,147 @@ def test_extract_age_all_null_series():
     
     pd.testing.assert_series_equal(result, expected)
 
+def test_extract_age_empty_series():
+    """
+    GIVEN: a completely empty pandas Series (length 0) 
+    WHEN: the extract_age_in_days function is executed
+    THEN: an empty Series is returned immediately, preserving the empty structure and float dtype
+    """
+
+    empty_series = pd.Series([], dtype=object)
+    expected = pd.Series([], dtype=float)
+    
+    result = extract_age_in_days(empty_series)
+    
+    assert result.empty
+    pd.testing.assert_series_equal(result, expected)
+
 
 # =====================================================================
 #                       DATA CLEANER TESTS
 # =====================================================================
+def test_datacleaner_fit_returns_self(train_df):
+    """
+    GIVEN: an unfitted DataCleaner
+    WHEN: fit is executed
+    THEN: the same instance is returned (sklearn convention, enables chaining
+          and TransformerMixin.fit_transform)
+    """
+    cleaner = DataCleaner()
+    assert cleaner.fit(train_df) is cleaner
+
+def test_datacleaner_custom_columns_to_remove(train_df):
+    """
+    GIVEN: a DataCleaner initialised with a custom columns_to_remove list
+    WHEN: fit and transform are executed
+    THEN: only the requested columns are dropped (init parameter is honoured)
+    """
+    cleaner = DataCleaner(columns_to_remove=["Name"])
+    df_clean = cleaner.fit(train_df).transform(train_df)
+
+    assert "Name" not in df_clean.columns
+    assert "AnimalID" in df_clean.columns 
 
 
-def test_datacleaner_column_dropping():
-    """Verify that irrelevant columns are removed and AgeuponOutcome is converted.
-
-    GIVEN: a DataFrame containing columns to drop (AnimalID, OutcomeSubtype),
-    AgeuponOutcome, and Name/SexuponOutcome WHEN: clean_data is executed THEN:
-    AnimalID, OutcomeSubtype, and AgeuponOutcome are removed, and log_age_in_days is
-    added
+def test_datacleaner_column_dropping(fitted_cleaner, train_df):
+    """
+    GIVEN: a fitted cleaner and a frame containing AnimalID and OutcomeSubtype
+    WHEN: transform is executed
+    THEN: leaky columns and AgeuponOutcome are removed, log_age_in_days is added
     """
 
-    df_mock = pd.DataFrame(
-        {
-            "AnimalID": ["A1", "A2"],
-            "OutcomeSubtype": ["Partner", "Foster"],
-            "Name": ["Bella", "Max"],
-            "SexuponOutcome": ["Neutered Male", "Intact Female"],
-            "AgeuponOutcome": ["1 year", "2 years"],
-        },
-        index=[10, 20],
+    df_clean = fitted_cleaner.transform(train_df)
+
+    assert "AnimalID" not in df_clean.columns
+    assert "OutcomeSubtype" not in df_clean.columns
+    assert "AgeuponOutcome" not in df_clean.columns
+    assert "log_age_in_days" in df_clean.columns
+
+
+def test_datacleaner_prevents_data_leakage(train_df):
+    """
+    GIVEN: a training DataFrame with specific median age (2 years = 730 days) and sex mode (Neutered Male)
+           and a test DataFrame with missing values
+    WHEN: fit is called on train, and transform is called on test
+    THEN: the test DataFrame is imputed using train statistics, completely preventing data leakage
+    """
+
+    df_test = pd.DataFrame(
+        {"SexuponOutcome": [np.nan], "AgeuponOutcome": [np.nan]}, index=[99]
     )
-    expected_columns = {"Name", "SexuponOutcome", "log_age_in_days"}
 
-    df_clean = DataCleaner().clean_data(df_mock)
+    cleaner = DataCleaner().fit(train_df)
+    df_test_clean = cleaner.transform(df_test)
 
-    assert set(df_clean.columns) == expected_columns
+    assert df_test_clean["SexuponOutcome"].iloc[0] == "Neutered Male"
+    assert np.isclose(
+        df_test_clean["log_age_in_days"].iloc[0], np.log1p(730.0), atol=1e-7
+    )
 
 
-def test_datacleaner_name_imputation():
-    """Verify that missing values in the Name column are filled with "Unknown".
+def test_datacleaner_raises_runtime_error_if_unfitted():
+    """
+    GIVEN: a DataCleaner instance that has not been fitted
+    WHEN: transform is executed
+    THEN: a RuntimeError is raised with an informative error message
+    """
+    cleaner = DataCleaner()
 
+    with pytest.raises(RuntimeError, match="not fitted"):
+        cleaner.transform(pd.DataFrame({"Name": ["Bella"]}))
+
+
+def test_datacleaner_name_imputation(fitted_cleaner, train_df):
+    """
     GIVEN: a DataFrame with some null values (NaN) in the Name column
-    WHEN: clean_data is executed
+    WHEN: transform is executed
     THEN: all missing values in the Name column are replaced with "Unknown",
     preserving the original index
     """
-    df_mock = pd.DataFrame({"Name": ["Bella", np.nan, "Luna"]}, index=[10, 20, 30])
-    expected = pd.Series(
-        ["Bella", "Unknown", "Luna"], index=[10, 20, 30], name="Name"
-    )
+    df_clean = fitted_cleaner.transform(train_df)
 
-    df_clean = DataCleaner().clean_data(df_mock)
-
-    pd.testing.assert_series_equal(df_clean["Name"], expected)
+    assert df_clean["Name"].isnull().sum() == 0
+    assert df_clean.loc[20, "Name"] == "Unknown"
 
 
-def test_datacleaner_sex_imputation():
-    """Verify that missing values in SexuponOutcome are imputed using the
-    column's mode.
-
+def test_datacleaner_sex_imputation(fitted_cleaner, train_df):
+    """
     GIVEN: a DataFrame with a missing value in SexuponOutcome where "Neutered
     Male" is the mode
-    WHEN: clean_data is executed
+    WHEN: transform is executed
     THEN: the missing value is replaced by the mode "Neutered Male", preserving
     the index
     """
-    df_mock = pd.DataFrame(
-        {
-            "SexuponOutcome": [
-                "Neutered Male",
-                "Neutered Male",
-                "Intact Female",
-                np.nan,
-                "Neutered Male",
-            ]
-        },
-        index=[10, 20, 30, 40, 50],
-    )
-    expected = pd.Series(
-        [
-            "Neutered Male",
-            "Neutered Male",
-            "Intact Female",
-            "Neutered Male",
-            "Neutered Male",
-        ],
-        index=[10, 20, 30, 40, 50],
-        name="SexuponOutcome",
-    )
+    df_clean = fitted_cleaner.transform(train_df)
 
-    df_clean = DataCleaner().clean_data(df_mock)
+    assert df_clean.loc[40, "SexuponOutcome"] == "Neutered Male"
+   
 
-    pd.testing.assert_series_equal(df_clean["SexuponOutcome"], expected)
-
-def test_datacleaner_age_imputation():
-    """Verify that AgeuponOutcome is converted, imputed with median, and log-transformed.
-
+def test_datacleaner_age_imputation(fitted_cleaner, train_df):
+    """
     GIVEN: a DataFrame with AgeuponOutcome values whose valid median in days is 730.0
-    WHEN: clean_data is executed
+    WHEN: transform is executed
     THEN: AgeuponOutcome is converted, dropped, its NaNs are filled with the median (730.0),
           and the resulting column is log-transformed, preserving the index
     """
-    df_mock = pd.DataFrame(
-        {"AgeuponOutcome": ["1 year", "2 years", "3 years", np.nan, "2 years"]},
-        index=[10, 20, 30, 40, 50],
-    )
-    expected_days = np.array([365.0, 730.0, 1095.0, 730.0, 730.0])
+    expected_days = np.array([365.0, 730.0, 1095.0, 730.0])
     expected = pd.Series(
-        np.log1p(expected_days),
-        index=[10, 20, 30, 40, 50],
-        name="log_age_in_days",
+        np.log1p(expected_days), index=[10, 20, 30, 40], name="log_age_in_days"
     )
 
-    df_clean = DataCleaner().clean_data(df_mock)
+    df_clean = fitted_cleaner.transform(train_df)
 
-    pd.testing.assert_series_equal(df_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7)
+    pd.testing.assert_series_equal(
+        df_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7
+    )
 
 def test_datacleaner_age_log_transformation():
     """
-    Verify that age values are correctly transformed using the np.log1p formula.
-
     GIVEN: a DataFrame with valid AgeuponOutcome entries ("0 days", "7 days") 
-           that do not trigger median calculation (no missing values)
-    WHEN: clean_data is executed
+           that do not need imputation
+    WHEN: fit and transform are executed
     THEN: the resulting log_age_in_days column contains mathematically correct 
-          log1p values, and the original column is dropped, preserving index
+          log1p values, and the original column is dropped, preserving index (covers the no-missing-age branch)
     """
     
     df_mock = pd.DataFrame({"AgeuponOutcome": ["0 days", "7 days"]}, index=[10, 20])
@@ -207,41 +246,63 @@ def test_datacleaner_age_log_transformation():
     
     expected = pd.Series([np.log1p(0.0), np.log1p(7.0)], index=[10, 20], name="log_age_in_days")
 
-    df_clean = DataCleaner().clean_data(df_mock)
+    df_clean = DataCleaner().fit(df_mock).transform(df_mock)
 
     pd.testing.assert_series_equal(df_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7)
 
 
-def test_datacleaner_breed_color_preventive_imputation():
-    """Verify that potential missing values in Breed and Color are preventively imputed with "Unknown".
-
+def test_datacleaner_breed_color_preventive_imputation(fitted_cleaner, train_df):
+    """
     GIVEN: a DataFrame containing missing values (NaN) in both Breed and Color columns,
            with custom non-default indices
-    WHEN: clean_data is executed on DataCleaner
+    WHEN: transform is executed
     THEN: all missing values (NaN) in both columns are successfully replaced with "Unknown",
           preserving the original index
     """
-    df_mock = pd.DataFrame({
-        "Breed": ["Chihuahua Mix", np.nan],
-        "Color": [np.nan, "Black"]
-    }, index=[100, 200])
-    
-    expected_breed = pd.Series(["Chihuahua Mix", "Unknown"], index=[100, 200], name="Breed")
-    expected_color = pd.Series(["Unknown", "Black"], index=[100, 200], name="Color")
-  
-    df_clean = DataCleaner().clean_data(df_mock)
+    df_clean = fitted_cleaner.transform(train_df)
 
-    pd.testing.assert_series_equal(df_clean["Breed"], expected_breed)
-    pd.testing.assert_series_equal(df_clean["Color"], expected_color)
+    assert df_clean.loc[20, "Breed"] == "Unknown"
+    assert df_clean.loc[10, "Color"] == "Unknown"
+
+
+
+def test_datacleaner_fit_without_sex_and_age_columns():
+    """
+    GIVEN: a DataFrame without SexuponOutcome and AgeuponOutcome 
+    WHEN: fit is executed
+    THEN: safe fallbacks are learned ('Unknown', 0.0) (covers the
+          missing-column branches of fit)
+    """
+    df_mock = pd.DataFrame({"Breed": ["Beagle"], "Color": ["Black"]})
+
+    cleaner = DataCleaner().fit(df_mock)
+
+    assert cleaner.sex_mode_ == "Unknown"
+    assert cleaner.age_median_ == 0.0
+
+
+def test_datacleaner_transform_without_sex_and_age_columns(fitted_cleaner):
+    """
+    GIVEN: a fitted cleaner and a DataFrame without SexuponOutcome and AgeuponOutcome
+    WHEN: transform is executed
+    THEN: log_age_in_days column isn't created and nothing raises (covers
+          the missing-column branches of transform)
+    """
+    df_mock = pd.DataFrame({"Name": ["Bella", np.nan]}, index=[1, 2])
+
+    df_clean = fitted_cleaner.transform(df_mock)
+
+    assert "log_age_in_days" not in df_clean.columns
+    assert df_clean.loc[2, "Name"] == "Unknown"
 
 
 def test_datacleaner_all_nan():
-    """Verify DataCleaner behavior under extreme cases where all variables are NaN.
-
+    """
     GIVEN: a DataFrame where all elements are missing
-    WHEN: clean_data is executed
+    WHEN: fit and transform are executed
     THEN: Name and SexuponOutcome fall back to "Unknown", and log_age_in_days
-          remains NaN, preserving the original index and data types
+          is safely imputed with 0.0, preserving the original index (covers the empty-mode and
+          empty-median fallback branches)
     """
     df_mock = pd.DataFrame(
         {
@@ -255,11 +316,53 @@ def test_datacleaner_all_nan():
         {
             "Name": ["Unknown", "Unknown"],
             "SexuponOutcome": ["Unknown", "Unknown"],
-            "log_age_in_days": [np.nan, np.nan], 
+            "log_age_in_days": [0.0, 0.0], 
         },
         index=[100, 200],
     )
 
-    df_clean = DataCleaner().clean_data(df_mock)
+    df_clean = DataCleaner().fit(df_mock).transform(df_mock)
 
     pd.testing.assert_frame_equal(df_clean, expected)
+
+
+def test_datacleaner_empty_dataframe():
+    """
+    GIVEN: an empty DataFrame with valid column headers
+    WHEN: fit and transform are executed
+    THEN: the output DataFrame is empty, schema is preserved, and default fallback states are learned
+    """
+    df_mock = pd.DataFrame(columns=["Name", "SexuponOutcome", "AgeuponOutcome"])
+    
+    cleaner = DataCleaner().fit(df_mock)
+    df_clean=cleaner.transform(df_mock)
+
+    assert cleaner.sex_mode_ == "Unknown"
+    assert cleaner.age_median_ == 0.0    
+    assert df_clean.empty
+    assert "log_age_in_days" in df_clean.columns
+    assert "AgeuponOutcome" not in df_clean.columns
+
+def test_datacleaner_does_not_mutate_input(fitted_cleaner, train_df):
+    """
+    GIVEN: a fitted cleaner and an input DataFrame
+    WHEN: transform is executed
+    THEN: the input frame is unchanged 
+    """
+    original = train_df.copy(deep=True)
+
+    fitted_cleaner.transform(train_df)
+
+    pd.testing.assert_frame_equal(train_df, original)
+
+
+def test_datacleaner_logs_imputation(fitted_cleaner, train_df, caplog):
+    """
+    GIVEN: a fitted cleaner and a DataFrame with missing values
+    WHEN: transform is executed with INFO logging captured
+    THEN: the imputation events are logged (logging, not print)
+    """
+    with caplog.at_level(logging.INFO):
+        fitted_cleaner.transform(train_df)
+
+    assert any("Imputed" in record.message for record in caplog.records)

@@ -1,14 +1,34 @@
 """
-Data preprocessing module.
+Preprocessing and Cleaning Module for the Shelter Animal Outcomes Dataset.
 
+This module provides the primary data cleaning pipeline and custom transformers 
+required to prepare raw data for machine learning algorithms. 
+
+Exported Classes
+----------------
+DataCleaner
+    A class that orchestrates column dropping,
+    imputations and mathematical formatting.
+
+Exported Functions
+------------------
+extract_age_in_days(age_series: pd.Series) -> pd.Series
+    Function that parses textual age strings 
+    (e.g., '2 years', '3 weeks') into equivalent numeric float days.
 """
+from __future__ import annotations
 import pandas as pd
 import numpy as np
+import logging
+from dataclasses import dataclass, field
+from sklearn.base import TransformerMixin
+
+logger = logging.getLogger(__name__)
 
 def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     """
-    Converse a textual Series of age (e.g., '2 years') into a numeric Series of days.
-    Utilizes Pandas vectorization to maximize performance (no for-loops).
+    Convert a textual Series of age (e.g., '2 years') 
+    into a numeric Series of days (float).
     
     Parameters
     ----------
@@ -19,93 +39,118 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     -------
     pd.Series
         A new column with the values converted into numeric days (float).
+        Non-parsable entries are NaN.
     """
-
-    # 1. Handle the case where the entire Series is NaN
     if age_series.isnull().all():
         return pd.Series(np.nan, index=age_series.index, dtype=float)
     
-    # 2. Extract the numeric part of the age string:
-    #.str.extract(r'(\d+)') finds the first occurrence of one or more digits in the string and returns it as a new Series.
     numeric_values = age_series.str.extract(r'(\d+)')[0].astype(float)
-    
-    # 3. To ensure case insensitivity, we convert the text to lowercase.
+
     text = age_series.str.lower()
     
-    # 4. Create a multiplier based on the time unit found in the text.
-    multipliers = np.where(text.str.contains('year', na=False), 365.0,
-                     np.where(text.str.contains('month', na=False), 30.0,
-                     np.where(text.str.contains('week', na=False), 7.0,
-                     np.where(text.str.contains('day', na=False), 1.0, 
-                     np.nan)))) # Se non trova nulla o è NaN, restituisce NaN
+    conds = [
+        text.str.contains('year', na=False),
+        text.str.contains('month', na=False),
+        text.str.contains('week', na=False),
+        text.str.contains('day', na=False)
+    ]
+    choices = [365.0, 30.0, 7.0, 1.0]
     
+    multipliers = np.select(conds, choices, default=np.nan)
 
-    
-    # 5. Multiply the numeric values by their corresponding multipliers to get the age in days. 
-    # The NaN values will remain NaN because a number multiplied by NaN is NaN.
     return numeric_values * multipliers
  
-#REMEMBER TO FIX DATA LEAKAGE IN IMPUTATION!!! + ALL NAN CASE FOR AGE
-class DataCleaner:
+# May need BaseEstimator other than TransformerMixin ... in case of future GridSearch (?)
+@dataclass
+class DataCleaner(TransformerMixin):
     """
     Initial class for cleaning the Shelter Animal Outcomes dataset.
-    
-    This class handles the basic preprocessing steps, including the removal
-    of irrelevant or data-leaking columns and the imputation of
-    missing values.
+    Responsibilities
+    ----------------
+    - Drop leaky or irrelevant columns.
+    - Impute missing values for key columns.
+    - Convert ``AgeuponOutcome`` to log age in days.
 
     """
-    
-    def __init__(self):
-        """
-        Initialize the DataCleaner with a list of columns to remove.
 
-        """
-        self.columns_to_remove = ["AnimalID", "OutcomeSubtype"]
+    columns_to_remove: list[str] = field(
+    default_factory=lambda: ["AnimalID", "OutcomeSubtype"])
 
-    def clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Clean the input DataFrame by removing specified columns and imputing missing values.
+    sex_mode_: str | None = field(default=None, init=False, repr=False)
+    age_median_: float | None = field(default=None, init=False, repr=False)
 
+    def fit(self, df: pd.DataFrame) -> "DataCleaner":
+       """Learn imputation statistics (mode for sex, median age in days).
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Training DataFrame.
+        Returns
+        -------
+        DataCleaner
+            Fitted instance.
         """
-        df_clean = df.copy()
+       if "SexuponOutcome" in df.columns:
+            modes = df["SexuponOutcome"].mode()
+            self.sex_mode_ = modes.iloc[0] if not modes.empty else "Unknown"
+       else:
+            self.sex_mode_ = "Unknown"
 
-        # 1. Columns that are not relevant or have too many missing values are removed
-        df_clean = df_clean.drop(
-            columns=self.columns_to_remove, errors="ignore"
+       if "AgeuponOutcome" in df.columns:
+            age_days = extract_age_in_days(df["AgeuponOutcome"])
+            valid_ages = age_days.dropna()
+            self.age_median_ = float(valid_ages.median()) if not valid_ages.empty else 0.0
+       else:
+            self.age_median_ = 0.0
+       logger.info(
+            "Fitted DataCleaner: sex_mode_='%s', age_median_=%.1f days",
+            self.sex_mode_,
+            self.age_median_,
         )
+       return self
+    
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply learned statistics to clean and impute the dataset.
+        Parameters
+        ----------
+        df : pd.DataFrame
+            DataFrame to clean (train, validation or test).
+        Returns
+        -------
+        pd.DataFrame
+            Cleaned copy of the input DataFrame.
+        """
+        if self.sex_mode_ is None or self.age_median_ is None:
+            raise RuntimeError(
+                "DataCleaner instance is not fitted. Call 'fit' before 'transform'."
+            )
+        df_clean = df.copy()
+        df_clean = df_clean.drop(columns=self.columns_to_remove, errors="ignore")
 
-        # 2. Name imputation: if the 'Name' column is present, we fill missing values with "Unknown".
-        if "Name" in df_clean.columns:
-            df_clean["Name"] = df_clean["Name"].fillna("Unknown")
-        
-        # 3. Sex imputation: categorical variable with only 1 missing value, so it's best to use the mode for imputation
+        fill_targets = ("Name", "Breed", "Color")
+        fill_values = {col: "Unknown" for col in fill_targets if col in df_clean.columns}
+        df_clean = df_clean.fillna(value=fill_values)
+
         if "SexuponOutcome" in df_clean.columns:
-            modes = df_clean["SexuponOutcome"].mode()
-            mode_sex = modes[0] if not modes.empty else "Unknown"
-            df_clean["SexuponOutcome"] = df_clean["SexuponOutcome"].fillna(
-                    mode_sex
+            n_missing_sex = df_clean["SexuponOutcome"].isna().sum()
+            df_clean["SexuponOutcome"] = df_clean["SexuponOutcome"].fillna(self.sex_mode_)
+            if n_missing_sex:
+                logger.info(
+                    "Imputed %d missing SexuponOutcome -> mode '%s'",
+                    n_missing_sex,
+                    self.sex_mode_,
                 )
 
-       # 4. Pipeline for AgeuponOutcome: we extract the age in days, impute missing values with the median, and apply a log1p transformation to reduce skewness.
         if "AgeuponOutcome" in df_clean.columns:
             age_days = extract_age_in_days(df_clean["AgeuponOutcome"])
-
-            # Missing value imputation: we fill NaN values with the median of the non-NaN values. If all values are NaN, we leave them as NaN.
-            valid_ages = age_days.dropna()
-            if not valid_ages.empty:
-                age_days = age_days.fillna(valid_ages.median())
-
-            # Skewness reduction: we apply a log1p transformation to the age in days. This is particularly useful for machine learning models.
-            # log1p is used instead of log to handle the case where age_days might be 0.
+            n_missing_age = age_days.isna().sum()
+            age_days = age_days.fillna(self.age_median_)
+            if n_missing_age:
+                logger.info(
+                    "Imputed %d missing AgeuponOutcome -> median %.1f days",
+                    n_missing_age,
+                    self.age_median_,
+                )
             df_clean["log_age_in_days"] = np.log1p(age_days)
             df_clean = df_clean.drop(columns=["AgeuponOutcome"])
-
-      # 5. Breed and Color imputation: even if in the dataset there's no missing value for those features,
-      # it's important to impute to make the model as general as possible
-        if "Breed" in df_clean.columns:
-            df_clean["Breed"] = df_clean["Breed"].fillna("Unknown")
-        if "Color" in df_clean.columns:
-            df_clean["Color"] = df_clean["Color"].fillna("Unknown")
-            
         return df_clean
