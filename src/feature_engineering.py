@@ -1,62 +1,102 @@
+"""
+Feature Engineering and Transformation Module for the Shelter Animal Outcomes Dataset.
+
+This module provides custom Scikit-Learn compliant transformers designed to extract, 
+engineer, and encode domain-specific features from cleaned shelter data.
+
+Exported Classes
+----------------
+TemporalFeaturesExtractor
+    A class that transforms raw DateTime strings into cyclic sine/cosine 
+    coordinates and structural weekend flags.
+
+RareCategoriesGrouper
+    A stateful transformer that dynamically bins low-frequency categorical 
+    levels into an 'Other' category based on an information retention threshold.
+
+CategoricalFeaturesEngineer
+    An orchestrator that handles primary text extraction, breed mix detection, 
+    and rare category grouping for high-cardinality columns.
+
+SexFeaturesExtractor
+    A class that simplifies raw sex-upon-outcome strings into predictive 
+    reproductive status categories.
+
+NameFeaturesExtractor
+    A transformer that converts textual animal name data into a binary 
+    indicator representing name presence.
+
+Exported Functions
+------------------
+extract_primary_color(color_series: pd.Series) -> pd.Series
+    Function that isolates the first listed color component from strings 
+    delimited by a forward slash.
+
+extract_primary_breed(breed_series: pd.Series) -> pd.Series
+    Function that extracts the primary breed component and strips the trailing 
+    'Mix' keyword from string data.
+"""
+
+from __future__ import annotations
 import numpy as np
 import pandas as pd
 import warnings
 from sklearn.base import BaseEstimator, TransformerMixin
+import logging
+from dataclasses import dataclass, field
+logger = logging.getLogger(__name__)
 
-import numpy as np
-import pandas as pd
-
-class TemporalFeaturesExtractor:
+@dataclass
+class TemporalFeaturesExtractor(TransformerMixin, BaseEstimator):
     """Extracts cyclic and high-level operational temporal features from DateTime."""
+    datetime_col: str = "DateTime"
 
-    def __init__(self, datetime_col: str = "DateTime"):
-        self.datetime_col = datetime_col
+    def fit(self, df: pd.DataFrame, y=None) -> "TemporalFeaturesExtractor":
+        """Stateless transformer: nothing to learn during fit."""
+        return self
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        df_out = df.copy()
-        two_pi=2 * np.pi
-        if self.datetime_col not in df_out.columns:
-            return df_out
+        """Transform raw DateTime strings into cyclic sine/cosine coordinates."""
+        if self.datetime_col not in df.columns:
+            return df
 
-        df_out[self.datetime_col] = pd.to_datetime(df_out[self.datetime_col])
-        dt_series = df_out[self.datetime_col]
+        df[self.datetime_col] = pd.to_datetime(df[self.datetime_col])
+        dt_series = df[self.datetime_col]
+        two_pi = 2 * np.pi
 
         hours = dt_series.dt.hour
-        df_out["Hour_sin"] = np.sin(two_pi * hours / 24)
-        df_out["Hour_cos"] = np.cos(two_pi * hours / 24)
+        df["Hour_sin"] = np.sin(two_pi * hours / 24)
+        df["Hour_cos"] = np.cos(two_pi * hours / 24)
 
         weekday = dt_series.dt.dayofweek
-        df_out["Wday_sin"] = np.sin(two_pi * weekday / 7)
-        df_out["Wday_cos"] = np.cos(two_pi * weekday / 7)
+        df["Wday_sin"] = np.sin(two_pi * weekday / 7)
+        df["Wday_cos"] = np.cos(two_pi * weekday / 7)
 
 
-        df_out["IsWeekend"] = np.where(
+        df["IsWeekend"] = np.where(
             weekday.isna(),
             np.nan,
             (weekday >= 5).astype(float)
         )
 
         doy = dt_series.dt.dayofyear
-        df_out["DoY_sin"] = np.sin(two_pi * doy / 365.25)
-        df_out["DoY_cos"] = np.cos(two_pi * doy / 365.25)
+        df["DoY_sin"] = np.sin(two_pi * doy / 365.25)
+        df["DoY_cos"] = np.cos(two_pi * doy / 365.25)
 
-        df_out = df_out.drop(columns=[self.datetime_col])
 
-        return df_out
+        return df.drop(columns=[self.datetime_col])
 
 
 def extract_primary_color(color_series: pd.Series) -> pd.Series:
     """Extract the primary color from a Series by splitting on '/'
-
-    and taking only the first color.
+       and taking only the first color.
     """
     return color_series.str.split("/").str[0].str.strip()
 
 
 def extract_primary_breed(breed_series: pd.Series) -> pd.Series:
     """Extract the primary breed from a Series by splitting on '/'
-
-    and stripping the trailing 'Mix' keyword.
+      and stripping the trailing 'Mix' keyword.
     """
     primary_breed = breed_series.str.split("/").str[0]
     primary_breed = primary_breed.str.replace(
@@ -65,6 +105,7 @@ def extract_primary_breed(breed_series: pd.Series) -> pd.Series:
     return primary_breed.str.strip()
 
 
+@dataclass
 class RareCategoriesGrouper(BaseEstimator, TransformerMixin):
     """Dynamic categorical grouper that solves high-cardinality issues.
 
@@ -73,81 +114,98 @@ class RareCategoriesGrouper(BaseEstimator, TransformerMixin):
     'Other'.
     """
 
-    def __init__(self, columns: list, max_other_ratio: float = 0.15):
-        """Initialize with target columns and the maximum allowed ratio for
-           'Other'."""
-        self.columns = columns
-        self.max_other_ratio = max_other_ratio
-        self.frequent_categories_ = {}
-
-    def fit(self, X: pd.DataFrame, y=None):
-        """Identify the minimal set of categories needed to meet the
+    columns: list[str]
+    max_other_ratio: float = 0.15
+    frequent_categories_: dict[str, list] | None = field(default=None, init=False, repr=False)
+    def fit(self, X: pd.DataFrame, y=None) -> "RareCategoriesGrouper":
+       """Identify the minimal set of categories needed to meet the
            information retention constraint.
-        """
-        for col in self.columns:
-            if col in X.columns:
-                
-                freqs = X[col].value_counts(normalize=True)
+         """
+       self.frequent_categories_ = {}
 
-                cum_sum = freqs.cumsum()
+       for col in self.columns:
+            if col not in X.columns:
+             raise ValueError(
+            f"Required column '{col}' is missing from the training DataFrame during fit. "
+            f"Please check your input features configuration."
+        )
 
-                target_ratio = 1.0 - self.max_other_ratio
+            freqs = X[col].value_counts(normalize=True)
+            if freqs.empty:
+                self.frequent_categories_[col] = []
+                logger.warning(f"Column '{col}' is empty or contains only NaNs during fit.")
+                continue
+            cum_sum = freqs.cumsum()
 
-                frequent = cum_sum[
+            target_ratio = 1.0 - self.max_other_ratio
+
+            frequent = cum_sum[
                     cum_sum.shift(fill_value=0) < target_ratio
                 ].index.tolist()
 
-                self.frequent_categories_[col] = frequent
-        return self
+            self.frequent_categories_[col] = frequent
+            logger.info(
+                "Fitted RareCategoriesGrouper for '%s': kept %d categories",
+                col, len(frequent)
+            )
+       return self
 
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Replace rare categories in the specified columns with 'Other'."""
-        X_out = X.copy()
+        if self.frequent_categories_ is None:
+            raise RuntimeError(
+                "RareCategoriesGrouper instance is not fitted. Call 'fit' before 'transform'."
+            )
+
+
+        if X.empty:
+            return X
+        
         for col in self.columns:
-            if col in X_out.columns and col in self.frequent_categories_:
+            if col in X.columns and col in self.frequent_categories_:
                 frequent = self.frequent_categories_[col]
-                X_out[col] = np.where(
-                    X_out[col].isin(frequent) | X_out[col].isna(),
-                    X_out[col],
+                X[col] = np.where(
+                    X[col].isin(frequent) | X[col].isna(),
+                    X[col],
                     "Other",
                 )
 
-                other_ratio = (X_out[col] == "Other").mean()
+                other_ratio = (X[col] == "Other").mean()
                 if other_ratio > self.max_other_ratio:
-                 warnings.warn(
-                    f"Column '{col}' has an 'Other' ratio of {other_ratio:.3f}, "
-                    f"which exceeds the configured max_other_ratio of {self.max_other_ratio:.3f}. ",
-                    RuntimeWarning,
-                )
-        return X_out
-
-
+                  msg = (
+                        f"Column '{col}' has an 'Other' ratio of {other_ratio:.3f}, "
+                        f"which exceeds the configured max_other_ratio of {self.max_other_ratio:.3f}."
+                    )
+                  logger.warning(msg)
+                  warnings.warn(msg, RuntimeWarning)
+                    
+        return X
+    
+@dataclass
 class CategoricalFeaturesEngineer(BaseEstimator, TransformerMixin):
     """Feature engineer for high-cardinality columns (Breed, Color).
 
     Extracts clean primary representations, determines if the animal is a mix,
     and dynamically bins low-frequency categories to prevent overfitting.
     """
+    columns: list[str] = field(default_factory=lambda: ["Breed", "Color"])
+    max_other_ratio: float = 0.15
+    grouper_: RareCategoriesGrouper | None = field(default=None, init=False, repr=False)
 
-    def __init__(self, columns: list = None, max_other_ratio: float = 0.15):
-        """Initialize with target columns and the information retention limit."""
-        self.columns = columns if columns is not None else ["Breed", "Color"]
-        self.max_other_ratio = max_other_ratio
-        self.grouper_ = None
-
-    def fit(self, X: pd.DataFrame, y=None):
+    def fit(self, X: pd.DataFrame, y=None)-> "CategoricalFeaturesEngineer":
         """Fit the internal RareCategoriesGrouper on primary representations of
            Breed and Color.
         """
         X_temp = X.copy()
+        existing_cols = [col for col in self.columns if col in X_temp.columns]
         if "Breed" in X_temp.columns:
             X_temp["Breed"] = extract_primary_breed(X_temp["Breed"])
         if "Color" in X_temp.columns:
             X_temp["Color"] = extract_primary_color(X_temp["Color"])
 
         self.grouper_ = RareCategoriesGrouper(
-            columns=self.columns, max_other_ratio=self.max_other_ratio
+            columns=existing_cols, max_other_ratio=self.max_other_ratio
         )
         self.grouper_.fit(X_temp)
         return self
@@ -157,72 +215,77 @@ class CategoricalFeaturesEngineer(BaseEstimator, TransformerMixin):
 
         with clean primary values and grouping rare ones.
         """
-        X_out = X.copy()
+        if self.grouper_ is None:
+            raise RuntimeError(
+                "CategoricalFeaturesEngineer instance is not fitted. Call 'fit' before 'transform'."
+            )
+        
 
-        if "Breed" in X_out.columns:
-            is_mix_series = X_out["Breed"].str.contains(
+        if "Breed" in X.columns:
+            is_mix_series = X["Breed"].str.contains(
                 "Mix", na=False, case=False
-            ) | X_out["Breed"].str.contains("/", na=False)
-            X_out["is_mix"] = is_mix_series.astype(int)
+            ) | X["Breed"].str.contains("/", na=False)
+            X["is_mix"] = is_mix_series.astype(int)
 
-            X_out["Breed"] = extract_primary_breed(X_out["Breed"])
+            X["Breed"] = extract_primary_breed(X["Breed"])
 
-        if "Color" in X_out.columns:
-            X_out["Color"] = extract_primary_color(X_out["Color"])
+        if "Color" in X.columns:
+            X["Color"] = extract_primary_color(X["Color"])
 
-        if self.grouper_ is not None:
-            X_out = self.grouper_.transform(X_out)
+            X = self.grouper_.transform(X)
 
-        return X_out
+        return X
     
-
+@dataclass
 class SexFeaturesExtractor(BaseEstimator, TransformerMixin):
     """Feature extractor focused solely on the highly predictive reproductive status."""
-
-    def __init__(self, sex_col: str = "SexuponOutcome"):
-        self.sex_col = sex_col
+    sex_col: str = "SexuponOutcome"
+    
+    def fit(self, df: pd.DataFrame, y=None) -> "SexFeaturesExtractor":
+        """Stateless transformer: nothing to learn during fit."""
+        return self
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        df_out = df.copy()
-        if self.sex_col not in df_out.columns:
-            return df_out
+        """Map raw sex strings to simplified reproductive states."""
+        if self.sex_col not in df.columns:
+            return df
 
-        is_neutered = df_out[self.sex_col].str.contains("Neutered|Spayed", na=False, case=False)
-        is_intact = df_out[self.sex_col].str.contains("Intact", na=False, case=False)
+        is_neutered = df[self.sex_col].str.contains("Neutered|Spayed", na=False, case=False)
+        is_intact = df[self.sex_col].str.contains("Intact", na=False, case=False)
         
-        df_out["Reproductive_Status"] = np.where(
+        df["Reproductive_Status"] = np.where(
             is_neutered, "Neutered/Spayed", 
             np.where(is_intact, "Intact", "Unknown")
         )
 
-        df_out = df_out.drop(columns=[self.sex_col])
+        df = df.drop(columns=[self.sex_col])
 
-        return df_out
+        return df
     
-
+@dataclass
 class NameFeaturesExtractor(BaseEstimator, TransformerMixin):
     """Feature extractor that converts the high-cardinality text column 'Name'
        into a binary indicator 'has_name'.
     """
-
-    def __init__(self, name_col: str = "Name"):
-        self.name_col = name_col
-
+    name_col: str = "Name"
+    def fit(self, df: pd.DataFrame, y=None) -> "NameFeaturesExtractor":
+        """Stateless transformer: nothing to learn during fit."""
+        return self
+    
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Transform 'Name' into 'has_name', then drop the original column."""
-        df_out = df.copy()
-        if self.name_col not in df_out.columns:
-            return df_out
+        if self.name_col not in df.columns:
+            return df
 
         clean_name = (
-            df_out[self.name_col].fillna("").astype(str).str.strip()
+            df[self.name_col].fillna("").astype(str).str.strip()
         )
 
-        df_out["has_name"] = (
+        df["has_name"] = (
             (clean_name.str.len() > 0)
             & (clean_name.str.lower() != "unknown")
         ).astype(int)
 
-        df_out = df_out.drop(columns=[self.name_col])
+        df = df.drop(columns=[self.name_col])
 
-        return df_out
+        return df

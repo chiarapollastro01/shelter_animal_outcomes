@@ -39,7 +39,7 @@ def test_temporal_extractor_success():
     expected_weekend = pd.Series([0.0, 0.0, 1.0, 1.0], index=[10, 20, 30, 40], name="IsWeekend")
     expected_columns = {"Hour_sin", "Hour_cos", "Wday_sin", "Wday_cos", "DoY_sin", "DoY_cos", "IsWeekend"}
 
-    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+    df_transformed = TemporalFeaturesExtractor().fit_transform(df_mock)
 
     assert "DateTime" not in df_transformed.columns
     assert set(df_transformed.columns) == expected_columns
@@ -68,7 +68,7 @@ def test_temporal_cyclic_hours():
    expected_sin = pd.Series(np.sin(two_pi * np.array([0, 6, 12]) / 24), index=[11, 22, 33], name="Hour_sin")
    expected_cos = pd.Series(np.cos(two_pi* np.array([0, 6, 12]) / 24), index=[11, 22, 33], name="Hour_cos")
 
-   df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+   df_transformed = TemporalFeaturesExtractor().fit_transform(df_mock)
 
    pd.testing.assert_series_equal(df_transformed["Hour_sin"], expected_sin, check_exact=False, atol=1e-7)
    pd.testing.assert_series_equal(df_transformed["Hour_cos"], expected_cos, check_exact=False, atol=1e-7)
@@ -86,7 +86,7 @@ def test_temporal_cyclic_weekdays():
      expected_sin = pd.Series(np.sin(two_pi * np.array([0, 6]) / 7), index=[15, 25], name="Wday_sin")
      expected_cos = pd.Series(np.cos(two_pi * np.array([0, 6]) / 7), index=[15, 25], name="Wday_cos")
 
-     df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+     df_transformed = TemporalFeaturesExtractor().fit_transform(df_mock)
 
      pd.testing.assert_series_equal(df_transformed["Wday_sin"], expected_sin, check_exact=False, atol=1e-7)
      pd.testing.assert_series_equal(df_transformed["Wday_cos"], expected_cos, check_exact=False, atol=1e-7)
@@ -105,11 +105,10 @@ def test_temporal_cyclic_day_of_year():
     expected_sin = pd.Series(np.sin(two_pi * np.array([1, 100]) / 365.25), index=[11, 22], name="DoY_sin")
     expected_cos = pd.Series(np.cos(two_pi * np.array([1, 100]) / 365.25), index=[11, 22], name="DoY_cos")
 
-    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+    df_transformed = TemporalFeaturesExtractor().fit_transform(df_mock)
 
     pd.testing.assert_series_equal(df_transformed["DoY_sin"], expected_sin, check_exact=False, atol=1e-7)
     pd.testing.assert_series_equal(df_transformed["DoY_cos"], expected_cos, check_exact=False, atol=1e-7)
-
 
 
 def test_temporal_extractor_already_datetime_type():
@@ -123,8 +122,8 @@ def test_temporal_extractor_already_datetime_type():
     df_strings = pd.DataFrame({"DateTime": ["2026-07-06 12:00:00"]}, index=[99])
     df_datetime = pd.DataFrame({"DateTime": pd.to_datetime(["2026-07-06 12:00:00"])}, index=[99])
     
-    res_strings = TemporalFeaturesExtractor().transform(df_strings)
-    res_datetime = TemporalFeaturesExtractor().transform(df_datetime)
+    res_strings = TemporalFeaturesExtractor().fit_transform(df_strings)
+    res_datetime = TemporalFeaturesExtractor().fit_transform(df_datetime)
     
     pd.testing.assert_frame_equal(res_strings, res_datetime)
 
@@ -140,7 +139,7 @@ def test_temporal_extractor_empty_dataframe_with_columns():
 
     expected_cols = {"IsWeekend", "Hour_sin", "Hour_cos", "Wday_sin", "Wday_cos", "DoY_sin", "DoY_cos"}
     
-    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+    df_transformed = TemporalFeaturesExtractor().fit_transform(df_mock)
     
     assert df_transformed.empty
     assert set(df_transformed.columns) == expected_cols
@@ -154,7 +153,7 @@ def test_temporal_extractor_handles_null_values():
     """
     df_mock = pd.DataFrame({"DateTime": ["2026-07-12 12:00:00", None]}, index=[101, 102])
     
-    df_transformed = TemporalFeaturesExtractor().transform(df_mock)
+    df_transformed = TemporalFeaturesExtractor().fit_transform(df_mock)
     
 
     assert not np.isnan(df_transformed["Hour_sin"].loc[101])
@@ -181,11 +180,26 @@ def test_temporal_base_extractor_missing_column():
 
     df_mock = pd.DataFrame({"Name": ["Bella", "Max"]}, index=[100, 200])
 
-    df_transformed = TemporalFeaturesExtractor(datetime_col="DateTime").transform(
+    df_transformed = TemporalFeaturesExtractor(datetime_col="DateTime").fit_transform(
         df_mock
     )
 
     pd.testing.assert_frame_equal(df_transformed, df_mock)
+
+def test_temporal_extractor_fit_returns_self():
+    """Verify that TemporalFeaturesExtractor.fit returns the instance itself to allow method chaining.
+
+    GIVEN: a TemporalFeaturesExtractor instance and a valid mockup DataFrame
+    WHEN: the fit method is executed
+    THEN: the returned object must be exactly the same instance of TemporalFeaturesExtractor
+    """
+    df_mock = pd.DataFrame({"DateTime": ["2026-07-06 12:00:00"]})
+    extractor = TemporalFeaturesExtractor()
+    
+    fitted_extractor = extractor.fit(df_mock)
+    
+    assert fitted_extractor is extractor
+
 
 # =====================================================================
 #                           COLOR AND BREED 
@@ -244,6 +258,20 @@ def test_extract_primary_breed_logic():
     result = extract_primary_breed(breed_series)
 
     pd.testing.assert_series_equal(result, expected)
+
+def test_rare_categories_grouper_fit_returns_self():
+    """Verify that RareCategoriesGrouper.fit returns the instance itself to allow method chaining.
+
+    GIVEN: a RareCategoriesGrouper instance and a valid mockup DataFrame
+    WHEN: the fit method is executed
+    THEN: the returned object must be exactly the same instance of RareCategoriesGrouper
+    """
+    df_mock = pd.DataFrame({"Breed": ["A", "B"]})
+    grouper = RareCategoriesGrouper(columns=["Breed"])
+    
+    fitted_grouper = grouper.fit(df_mock)
+    
+    assert fitted_grouper is grouper
 
 def test_rare_categories_grouper_dynamic_preservation():
     """Verify that categories are dynamically preserved to keep 'Other' below the max ratio.
@@ -317,6 +345,81 @@ def test_rare_categories_grouper_emits_warning_on_drift():
         RuntimeWarning, match="exceeds the configured max_other_ratio"
     ):
         grouper.transform(df_test)
+
+def test_rare_categories_grouper_raises_value_error_on_missing_fit_column():
+    """Verify that RareCategoriesGrouper raises a ValueError if a required column is missing during fit.
+
+    GIVEN: a DataFrame missing a required column specified in the grouper's target configuration
+    WHEN: the fit method is executed
+    THEN: it must immediately raise a ValueError indicating the required column is missing from the training DataFrame
+    """
+    df_mock = pd.DataFrame({"Color": ["Black", "White"]})  # 'Breed' is missing
+    grouper = RareCategoriesGrouper(columns=["Breed"])
+    
+    with pytest.raises(ValueError, match="missing from the training DataFrame during fit"):
+        grouper.fit(df_mock)
+
+def test_rare_categories_grouper_raises_runtime_error_when_unfitted():
+    """Verify that RareCategoriesGrouper raises a RuntimeError if transform is called before fit.
+
+    GIVEN: a RareCategoriesGrouper instance that has not been fitted yet
+    WHEN: the transform method is executed on a DataFrame
+    THEN: it must immediately raise a RuntimeError indicating the instance is not fitted
+    """
+    df_mock = pd.DataFrame({"Breed": ["A", "B"]})
+    grouper = RareCategoriesGrouper(columns=["Breed"])
+    
+    with pytest.raises(RuntimeError, match="instance is not fitted. Call 'fit' before 'transform'"):
+        grouper.transform(df_mock)
+
+def test_rare_categories_grouper_fit_empty_column(caplog):
+    """Verify that RareCategoriesGrouper handles completely empty/NaN columns during fit safely with a warning.
+
+    GIVEN: a training DataFrame containing only missing values (NaN) in the target column
+    WHEN: the fit method is executed with WARNING logging level captured
+    THEN: a warning log is recorded, the execution doesn't crash, and the frequent categories list is set to empty
+    """
+    import logging
+    df_mock = pd.DataFrame({"Breed": [np.nan, np.nan]})
+    
+    grouper = RareCategoriesGrouper(columns=["Breed"])
+    
+    with caplog.at_level(logging.WARNING):
+        grouper.fit(df_mock)
+        
+    assert "is empty or contains only NaNs" in caplog.text
+    assert grouper.frequent_categories_["Breed"] == []
+
+def test_rare_categories_grouper_transform_empty_dataframe():
+    """Verify that transform returns an empty DataFrame untouched if the input is empty.
+
+    GIVEN: a properly fitted RareCategoriesGrouper instance and a completely empty test DataFrame schema
+    WHEN: the transform method is executed
+    THEN: the input DataFrame is returned completely unmodified, preserving its empty structure
+    """
+    df_train = pd.DataFrame({"Breed": ["A", "B"]})
+    df_empty = pd.DataFrame(columns=["Breed"])
+    
+    grouper = RareCategoriesGrouper(columns=["Breed"])
+    grouper.fit(df_train)
+    
+    result = grouper.transform(df_empty)
+    
+    assert result.empty
+
+
+def test_categorical_features_engineer_raises_runtime_error_when_unfitted():
+    """Verify that CategoricalFeaturesEngineer raises a RuntimeError if transform is called before fit.
+
+    GIVEN: a CategoricalFeaturesEngineer instance that has not been fitted yet
+    WHEN: the transform method is executed on a DataFrame
+    THEN: it must immediately raise a RuntimeError indicating the instance is not fitted
+    """
+    df_mock = pd.DataFrame({"Breed": ["A", "B"], "Color": ["Black", "White"]})
+    engineer = CategoricalFeaturesEngineer()
+    
+    with pytest.raises(RuntimeError, match="instance is not fitted. Call 'fit' before 'transform'"):
+        engineer.transform(df_mock)
 
 
 
@@ -405,7 +508,7 @@ def test_sex_features_extractor_reproductive_status():
     )
     
 
-    df_transformed = SexFeaturesExtractor().transform(df_mock)
+    df_transformed = SexFeaturesExtractor().fit_transform(df_mock)
     
     assert "SexuponOutcome" not in df_transformed.columns
     
@@ -425,7 +528,7 @@ def test_sex_features_extractor_missing_column():
   
     df_mock = pd.DataFrame({"Name": ["Bella", "Max"]}, index=[100, 200])
 
-    df_transformed = SexFeaturesExtractor(sex_col="SexuponOutcome").transform(
+    df_transformed = SexFeaturesExtractor(sex_col="SexuponOutcome").fit_transform(
         df_mock
     )
 
@@ -445,7 +548,6 @@ def test_name_features_extractor_presence():
     THEN: the raw Name column is dropped, and 'has_name' is 1 only for valid names
           and 0 for empty/unknown entries, preserving the original index
     """
-    # 1. GIVEN: Prepariamo l'input sporco con nomi validi, spazi, NaN e varianti di Unknown [2, 21]
     df_mock = pd.DataFrame(
         {"Name": ["Bella", "   ", np.nan, "Unknown", "UNKNOWN"]},
         index=[10, 20, 30, 40, 50],
@@ -454,7 +556,7 @@ def test_name_features_extractor_presence():
         [1, 0, 0, 0, 0], index=[10, 20, 30, 40, 50], name="has_name"
     )
 
-    df_transformed = NameFeaturesExtractor().transform(df_mock)
+    df_transformed = NameFeaturesExtractor().fit_transform(df_mock)
 
 
     assert "Name" not in df_transformed.columns
@@ -476,6 +578,6 @@ def test_name_features_extractor_missing_column():
     """
     df_mock = pd.DataFrame({"Age": [10, 20]}, index=[100, 200])
 
-    df_transformed = NameFeaturesExtractor(name_col="Name").transform(df_mock)
+    df_transformed = NameFeaturesExtractor(name_col="Name").fit_transform(df_mock)
 
     pd.testing.assert_frame_equal(df_transformed, df_mock)
