@@ -16,11 +16,11 @@ from src.prepare_data import main, prepare_and_split_data, parse_args
 def dummy_raw_csv(tmp_path: Path) -> Path:
     """Fixture providing a temporary raw CSV file with dummy data."""
     df = pd.DataFrame({
-        "AnimalID": ["A1", "A2", "A3"],
-        "OutcomeType": ["Adoption", "Transfer", "Euthanasia"],
-        "OutcomeSubtype": ["Partner", "Foster", "Rabies"],
-        "AnimalType": ["Dog", "Cat", "Dog"],
-        "AgeuponOutcome": ["1 year", "2 years", "1 month"]
+        "AnimalID": [f"A{i}" for i in range(1, 11)],
+        "OutcomeType": ["Adoption", "Transfer"]*5,
+        "OutcomeSubtype": ["Partner", "Foster"]*5,
+        "AnimalType": ["Dog", "Cat"]*5,
+        "AgeuponOutcome": ["1 year", "2 years"]*5
     })
     file_path = tmp_path / "raw_train.csv"
     df.to_csv(file_path, index=False)
@@ -35,17 +35,30 @@ def test_prepare_and_split_data_success(dummy_raw_csv: Path):
     """
     GIVEN: a valid raw CSV file containing target and leakage columns
     WHEN: prepare_and_split_data is executed
-    THEN: it returns X and y, removing OutcomeType and OutcomeSubtype from X
+    THEN: it returns X_train, X_test, y_train, y_test, with correct split 
+    proportions and OutcomeType and OutcomeSubtype columns removed
     """
-    X, y = prepare_and_split_data(dummy_raw_csv)
+    X_train, X_test, y_train, y_test = prepare_and_split_data(
+        dummy_raw_csv, test_size=0.2, random_state=42
+    )
 
-    assert "OutcomeType" not in X.columns
-    assert "OutcomeSubtype" not in X.columns
-    assert "AnimalType" in X.columns
-    assert len(X) == 3
-    assert len(y) == 3
-    assert y.name == "target"
-    assert list(y) == ["Adoption", "Transfer", "Euthanasia"]
+    assert "OutcomeType" not in X_train.columns
+    assert "OutcomeSubtype" not in X_train.columns
+    assert "OutcomeType" not in X_test.columns
+    assert "OutcomeSubtype" not in X_test.columns
+
+    # 10 rows total -> 80% train (8 rows), 20% test (2 rows)
+    assert len(X_train) == 8
+    assert len(X_test) == 2
+    assert len(y_train) == 8
+    assert len(y_test) == 2
+
+    assert y_train.name == "target"
+    assert y_test.name == "target"
+
+    # Check stratification (50% Adoption, 50% Transfer in both splits)
+    assert (y_train == "Adoption").sum() == 4
+    assert (y_test == "Adoption").sum() == 1
 
 
 def test_prepare_and_split_data_missing_target(tmp_path: Path):
@@ -68,92 +81,107 @@ def test_prepare_and_split_data_handles_missing_subtype(tmp_path: Path):
     THEN: it safely extracts the target and drops OutcomeType without raising KeyError
     """
     df = pd.DataFrame({
-        "AnimalID": ["A1"],
-        "OutcomeType": ["Adoption"],
-        "AnimalType": ["Dog"]
+        "AnimalID": [f"A{i}" for i in range(1, 11)],
+        "OutcomeType": ["Adoption", "Transfer"]*5,
+        "AnimalType": ["Dog", "Cat"]*5,
     })
     partial_csv = tmp_path / "partial.csv"
     df.to_csv(partial_csv, index=False)
 
-    X, y = prepare_and_split_data(partial_csv)
+    X_train, X_test, y_train, y_test = prepare_and_split_data(partial_csv)
 
-    assert "OutcomeType" not in X.columns
-    assert "AnimalType" in X.columns
+    assert "OutcomeType" not in X_train.columns
+    assert "OutcomeType" not in X_test.columns
+    assert "AnimalType" in X_train.columns
 
 
 def test_main_execution_creates_files(dummy_raw_csv: Path, tmp_path: Path):
     """
     GIVEN: valid input paths and non-existent output directories
     WHEN: main is executed
-    THEN: it creates the necessary directories and saves X and y as CSV files
+    THEN: it creates the directory and saves all 4 train/test feature and target CSV files
     """
-    out_features = tmp_path / "processed" / "test_features.csv"
-    out_target = tmp_path / "processed" / "test_target.csv"
+    output_dir = tmp_path / "processed_data"
 
-    assert not out_features.parent.exists()
+    assert not output_dir.exists()
 
-    main(dummy_raw_csv, out_features, out_target)
+    main(dummy_raw_csv, output_dir=output_dir, test_size=0.2, random_state=42)
 
-    assert out_features.parent.exists()
-    assert out_features.is_file()
-    assert out_target.is_file()
+    assert output_dir.exists()
 
-    X_saved = pd.read_csv(out_features)
-    y_saved = pd.read_csv(out_target)
+    train_features_path = output_dir / "train_features.csv"
+    test_features_path = output_dir / "test_features.csv"
+    train_target_path = output_dir / "train_target.csv"
+    test_target_path = output_dir / "test_target.csv"
 
-    assert "OutcomeType" not in X_saved.columns
-    assert y_saved.columns[0] == "target"
-    assert list(y_saved["target"]) == ["Adoption", "Transfer", "Euthanasia"]
+    assert train_features_path.is_file()
+    assert test_features_path.is_file()
+    assert train_target_path.is_file()
+    assert test_target_path.is_file()
+
+    X_train_saved = pd.read_csv(train_features_path)
+    y_train_saved = pd.read_csv(train_target_path)
+
+    assert "OutcomeType" not in X_train_saved.columns
+    assert y_train_saved.columns[0] == "target"
+    assert len(X_train_saved) == 8
 
 
 def test_parse_args_defaults():
     """
     GIVEN: a list containing only the required positional argument (raw_csv_path)
     WHEN: the parse_args function is executed with this list
-    THEN: the parsed namespace contains the correct positional path and assigns 
-          the expected default paths to both optional arguments
+    THEN: it assigns the correct default values for output directory, test size, and random state
     """
     args = parse_args(["my_raw_data.csv"])
     
     assert args.raw_csv_path == Path("my_raw_data.csv")
-    assert args.output_features == Path("data/split_data/train_features.csv")
-    assert args.output_target == Path("data/split_data/train_target.csv")
+    assert args.output_dir == Path("data/split_data")
+    assert args.test_size == 0.2
+    assert args.random_state == 42
 
 
 def test_parse_args_custom_values():
     """
-    GIVEN: a list containing the required positional argument and custom values 
-           for both optional flags (--output-features and --output-target)
+    GIVEN: custom arguments for output-dir, test-size, and random-state
     WHEN: the parse_args function is executed with this list
-    THEN: the parsed namespace correctly overrides the default values, assigning 
-          the custom paths provided
+    THEN: it correctly overrides all default values
     """
     args = parse_args([
         "my_raw_data.csv",
-        "--output-features", "custom/features.csv",
-        "--output-target", "custom/target.csv"
+        "--output-dir",
+        "custom/dir",
+        "--test-size",
+        "0.3",
+        "--random-state",
+        "123",
     ])
     
     assert args.raw_csv_path == Path("my_raw_data.csv")
-    assert args.output_features == Path("custom/features.csv")
-    assert args.output_target == Path("custom/target.csv")
+    assert args.output_dir == Path("custom/dir")
+    assert args.test_size == 0.3
+    assert args.random_state == 123
 
 
 def test_script_execution_as_main(dummy_raw_csv: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
-    GIVEN: a valid raw CSV and target output paths mocked in sys.argv
+    GIVEN: a valid raw CSV and output dir mocked in sys.argv
     WHEN: the prepare_data module is executed in-process as __main__ using run_module
     THEN: the entire entry point is executed, all CLI lines are covered,
-          and the expected output files are successfully created with zero warnings
+          and the expected 4 output files are successfully created with zero warnings
     """
-    out_features = tmp_path / "cli_features.csv"
-    out_target = tmp_path / "cli_target.csv"
+    output_dir = tmp_path / "cli_out"
 
-    monkeypatch.setattr(sys, "argv", [
+    monkeypatch.setattr(sys, "argv", 
+    [
         "src/prepare_data.py",
         str(dummy_raw_csv),
-        "--output-features", str(out_features),
-        "--output-target", str(out_target)
+        "--output-dir",
+            str(output_dir),
+            "--test-size",
+            "0.2",
+            "--random-state",
+            "42",
     ])
 
     # Clear the module cache to simulate a completely fresh script invocation.
@@ -164,5 +192,7 @@ def test_script_execution_as_main(dummy_raw_csv: Path, tmp_path: Path, monkeypat
 
     runpy.run_module("src.prepare_data", run_name="__main__")
 
-    assert out_features.exists()
-    assert out_target.exists()
+    assert (output_dir / "train_features.csv").exists()
+    assert (output_dir / "test_features.csv").exists()
+    assert (output_dir / "train_target.csv").exists()
+    assert (output_dir / "test_target.csv").exists()
