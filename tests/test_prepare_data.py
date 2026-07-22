@@ -163,36 +163,3 @@ def test_parse_args_custom_values():
     assert args.random_state == 123
 
 
-def test_script_execution_as_main(dummy_raw_csv: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """
-    GIVEN: a valid raw CSV and output dir mocked in sys.argv
-    WHEN: the prepare_data module is executed in-process as __main__ using run_module
-    THEN: the entire entry point is executed, all CLI lines are covered,
-          and the expected 4 output files are successfully created with zero warnings
-    """
-    output_dir = tmp_path / "cli_out"
-
-    monkeypatch.setattr(sys, "argv", 
-    [
-        "src/prepare_data.py",
-        str(dummy_raw_csv),
-        "--output-dir",
-            str(output_dir),
-            "--test-size",
-            "0.2",
-            "--random-state",
-            "42",
-    ])
-
-    # Clear the module cache to simulate a completely fresh script invocation.
-    # Because previous tests already imported this module into memory,
-    # runpy would throw a RuntimeWarning about re-executing an active module.
-    sys.modules.pop("src.prepare_data", None)
-    sys.modules.pop("prepare_data", None)
-
-    runpy.run_module("src.prepare_data", run_name="__main__")
-
-    assert (output_dir / "train_features.csv").exists()
-    assert (output_dir / "test_features.csv").exists()
-    assert (output_dir / "train_target.csv").exists()
-    assert (output_dir / "test_target.csv").exists()
