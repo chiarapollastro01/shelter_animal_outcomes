@@ -21,7 +21,7 @@ import pandas as pd
 import numpy as np
 import logging
 from dataclasses import dataclass, field
-from sklearn.base import TransformerMixin
+from sklearn.base import TransformerMixin, BaseEstimator
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +60,8 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
 
     return numeric_values * multipliers
  
-# May need BaseEstimator other than TransformerMixin ... in case of future GridSearch (?)
 @dataclass
-class DataCleaner(TransformerMixin):
+class DataCleaner(TransformerMixin, BaseEstimator):
     """
     Initial class for cleaning the Shelter Animal Outcomes dataset.
     Responsibilities
@@ -74,12 +73,12 @@ class DataCleaner(TransformerMixin):
     """
 
     columns_to_remove: list[str] = field(
-    default_factory=lambda: ["AnimalID", "OutcomeSubtype"])
+    default_factory=lambda: ["AnimalID"])
 
     sex_mode_: str | None = field(default=None, init=False, repr=False)
     age_median_: float | None = field(default=None, init=False, repr=False)
 
-    def fit(self, df: pd.DataFrame) -> "DataCleaner":
+    def fit(self, df: pd.DataFrame, y=None) -> "DataCleaner":
        """Learn imputation statistics (mode for sex, median age in days).
         Parameters
         ----------

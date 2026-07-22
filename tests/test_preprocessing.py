@@ -19,7 +19,7 @@ def train_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "AnimalID": ["A1", "A2", "A3", "A4"],
-            "OutcomeSubtype": ["Partner", "Foster", "Partner", "Foster"],
+            "DateTime": ["2026-01-01 10:00:00", "2026-01-02 11:00:00", "2026-01-03 12:00:00", "2026-01-04 13:00:00"],
             "Name": ["Bella", np.nan, "Luna", "Max"],
             "Breed": ["Chihuahua Mix", np.nan, "Beagle", "Beagle"],
             "Color": [np.nan, "Black", "White", "Black"],
@@ -121,8 +121,7 @@ def test_datacleaner_fit_returns_self(train_df):
     """
     GIVEN: an unfitted DataCleaner
     WHEN: fit is executed
-    THEN: the same instance is returned (sklearn convention, enables chaining
-          and TransformerMixin.fit_transform)
+    THEN: the same instance is returned
     """
     cleaner = DataCleaner()
     assert cleaner.fit(train_df) is cleaner
@@ -131,7 +130,7 @@ def test_datacleaner_custom_columns_to_remove(train_df):
     """
     GIVEN: a DataCleaner initialised with a custom columns_to_remove list
     WHEN: fit and transform are executed
-    THEN: only the requested columns are dropped (init parameter is honoured)
+    THEN: only the requested columns are dropped 
     """
     cleaner = DataCleaner(columns_to_remove=["Name"])
     df_clean = cleaner.fit(train_df).transform(train_df)
@@ -142,15 +141,14 @@ def test_datacleaner_custom_columns_to_remove(train_df):
 
 def test_datacleaner_column_dropping(fitted_cleaner, train_df):
     """
-    GIVEN: a fitted cleaner and a frame containing AnimalID and OutcomeSubtype
+    GIVEN: a fitted cleaner and a frame containing AnimalID
     WHEN: transform is executed
-    THEN: leaky columns and AgeuponOutcome are removed, log_age_in_days is added
+    THEN: AnimalID and AgeuponOutcome are removed, log_age_in_days is added
     """
 
     df_clean = fitted_cleaner.transform(train_df)
 
     assert "AnimalID" not in df_clean.columns
-    assert "OutcomeSubtype" not in df_clean.columns
     assert "AgeuponOutcome" not in df_clean.columns
     assert "log_age_in_days" in df_clean.columns
 
@@ -360,7 +358,7 @@ def test_datacleaner_logs_imputation(fitted_cleaner, train_df, caplog):
     """
     GIVEN: a fitted cleaner and a DataFrame with missing values
     WHEN: transform is executed with INFO logging captured
-    THEN: the imputation events are logged (logging, not print)
+    THEN: the imputation events are logged 
     """
     with caplog.at_level(logging.INFO):
         fitted_cleaner.transform(train_df)
