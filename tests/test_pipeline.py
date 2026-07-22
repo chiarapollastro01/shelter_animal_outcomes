@@ -44,7 +44,6 @@ def raw_mock_shelter_data() -> tuple[pd.DataFrame, pd.Series]:
         "AgeuponOutcome": ["1 year", "2 years", "3 weeks", "5 months"] * 10,
         "Breed": ["Labrador Mix", "Siamese", "Beagle", "Persian"] * 10,
         "Color": ["Black/White", "Brown Tabby", "White", "Red"] * 10,
-        "OutcomeSubtype": ["Partner", "Foster"] * 20,
     })
     y = pd.Series(["Adoption", "Adoption", "Transfer", "Euthanasia"] * 10)
     return X, y
