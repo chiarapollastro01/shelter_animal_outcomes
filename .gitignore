@@ -223,3 +223,8 @@ data/
 # Documentation Sphinx useless folders
 docs/source/_static
 docs/source/_templates
+
+# Ignore trained models and binary artifacts
+models/
+*.joblib
+*.pkl
