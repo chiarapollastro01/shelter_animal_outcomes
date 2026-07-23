@@ -1,5 +1,5 @@
 """
-Preprocessing and Cleaning Module for the Shelter Animal Outcomes Dataset.
+Preprocessing module for the Shelter Animal Outcomes Dataset.
 
 This module provides the primary data cleaning pipeline and custom transformers 
 required to prepare raw data for machine learning algorithms. 
@@ -7,8 +7,8 @@ required to prepare raw data for machine learning algorithms.
 Exported Classes
 ----------------
 DataCleaner
-    A class that orchestrates column dropping,
-    imputations and mathematical formatting.
+    A scikit-learn compatible transformer that orchestrates column dropping,
+    imputations and log-transformation of age in days..
 
 Exported Functions
 ------------------
@@ -33,13 +33,25 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     Parameters
     ----------
     age_series : pd.Series
-        The column containing the age strings.
+        Pandas Series containing textual age representations (e.g., '2 years').
         
     Returns
     -------
     pd.Series
-        A new column with the values converted into numeric days (float).
-        Non-parsable entries are NaN.
+        Numeric Series with age values converted to floating-point days.
+        Unparseable, empty, or NaN entries are returned as NaN.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> ages = pd.Series(["2 years", "1 month", "3 weeks", "4 days", None])
+    >>> extract_age_in_days(ages)
+    0    730.0
+    1     30.0
+    2     21.0
+    3      4.0
+    4      NaN
+    dtype: float64
     """
     if age_series.isnull().all():
         return pd.Series(np.nan, index=age_series.index, dtype=float)
@@ -63,12 +75,37 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
 @dataclass
 class DataCleaner(TransformerMixin, BaseEstimator):
     """
-    Initial class for cleaning the Shelter Animal Outcomes dataset.
-    Responsibilities
-    ----------------
-    - Drop leaky or irrelevant columns.
-    - Impute missing values for key columns.
-    - Convert ``AgeuponOutcome`` to log age in days.
+    Clean and impute raw shelter animal data for machine learning.
+
+    Orchestrates the initial cleaning phase of the pipeline by removing identifier
+    column, imputing categorical features with fixed labels
+    or learned modes, and transforming textual ages into log-scaled numeric days.
+
+    Parameters
+    ----------
+    columns_to_remove : list[str], default=["AnimalID"]
+        List of column names to drop from input DataFrames to prevent noise.
+
+    Attributes
+    ----------
+    sex_mode_ : str | None
+        The most frequent value learned from 'SexuponOutcome' during fitting.
+    age_median_ : float | None
+        The median age in days learned from 'AgeuponOutcome' during fitting.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({
+    ...     "AnimalID": ["A1", "A2"],
+    ...     "SexuponOutcome": ["Neutered Male", None],
+    ...     "AgeuponOutcome": ["2 years", None]
+    ... })
+    >>> cleaner = DataCleaner()
+    >>> cleaner.fit_transform(df)
+      SexuponOutcome  log_age_in_days
+    0  Neutered Male         6.594413
+    1  Neutered Male         6.594413
 
     """
 
@@ -80,14 +117,19 @@ class DataCleaner(TransformerMixin, BaseEstimator):
 
     def fit(self, df: pd.DataFrame, y=None) -> "DataCleaner":
        """Learn imputation statistics (mode for sex, median age in days).
+
         Parameters
         ----------
         df : pd.DataFrame
             Training DataFrame.
+
+        y : None, optional
+            Ignored. Included for scikit-learn compatibility.
+
         Returns
         -------
         DataCleaner
-            Fitted instance.
+            Fitted instance of the transformer.
         """
        if "SexuponOutcome" in df.columns:
             modes = df["SexuponOutcome"].mode()
@@ -110,14 +152,25 @@ class DataCleaner(TransformerMixin, BaseEstimator):
     
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply learned statistics to clean and impute the dataset.
+
+        Drops specified columns, fills missing categorical values ('Name', 'Breed',
+        'Color', 'SexuponOutcome'), converts textual ages to days, imputes missing ages
+        with the fitted median, and applies a log(1 + x) transformation.
+
         Parameters
         ----------
         df : pd.DataFrame
             DataFrame to clean (train, validation or test).
+
         Returns
         -------
         pd.DataFrame
             Cleaned copy of the input DataFrame.
+        
+        Raises
+        ------
+        RuntimeError
+            If transform() is called before the transformer is fitted.
         """
         if self.sex_mode_ is None or self.age_median_ is None:
             raise RuntimeError(
