@@ -115,12 +115,12 @@ class DataCleaner(TransformerMixin, BaseEstimator):
     sex_mode_: str | None = field(default=None, init=False, repr=False)
     age_median_: float | None = field(default=None, init=False, repr=False)
 
-    def fit(self, df: pd.DataFrame, y=None) -> "DataCleaner":
+    def fit(self, X: pd.DataFrame, y=None) -> "DataCleaner":
        """Learn imputation statistics (mode for sex, median age in days).
 
         Parameters
         ----------
-        df : pd.DataFrame
+        X : pd.DataFrame
             Training DataFrame.
 
         y : None, optional
@@ -131,14 +131,14 @@ class DataCleaner(TransformerMixin, BaseEstimator):
         DataCleaner
             Fitted instance of the transformer.
         """
-       if "SexuponOutcome" in df.columns:
-            modes = df["SexuponOutcome"].mode()
+       if "SexuponOutcome" in X.columns:
+            modes = X["SexuponOutcome"].mode()
             self.sex_mode_ = modes.iloc[0] if not modes.empty else "Unknown"
        else:
             self.sex_mode_ = "Unknown"
 
-       if "AgeuponOutcome" in df.columns:
-            age_days = extract_age_in_days(df["AgeuponOutcome"])
+       if "AgeuponOutcome" in X.columns:
+            age_days = extract_age_in_days(X["AgeuponOutcome"])
             valid_ages = age_days.dropna()
             self.age_median_ = float(valid_ages.median()) if not valid_ages.empty else 0.0
        else:
@@ -150,7 +150,7 @@ class DataCleaner(TransformerMixin, BaseEstimator):
         )
        return self
     
-    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Apply learned statistics to clean and impute the dataset.
 
         Drops specified columns, fills missing categorical values ('Name', 'Breed',
@@ -159,7 +159,7 @@ class DataCleaner(TransformerMixin, BaseEstimator):
 
         Parameters
         ----------
-        df : pd.DataFrame
+        X : pd.DataFrame
             DataFrame to clean (train, validation or test).
 
         Returns
@@ -176,16 +176,16 @@ class DataCleaner(TransformerMixin, BaseEstimator):
             raise RuntimeError(
                 "DataCleaner instance is not fitted. Call 'fit' before 'transform'."
             )
-        df_clean = df.copy()
-        df_clean = df_clean.drop(columns=self.columns_to_remove, errors="ignore")
+        X_clean = X.copy()
+        X_clean = X_clean.drop(columns=self.columns_to_remove, errors="ignore")
 
         fill_targets = ("Name", "Breed", "Color")
-        fill_values = {col: "Unknown" for col in fill_targets if col in df_clean.columns}
-        df_clean = df_clean.fillna(value=fill_values)
+        fill_values = {col: "Unknown" for col in fill_targets if col in X_clean.columns}
+        X_clean = X_clean.fillna(value=fill_values)
 
-        if "SexuponOutcome" in df_clean.columns:
-            n_missing_sex = df_clean["SexuponOutcome"].isna().sum()
-            df_clean["SexuponOutcome"] = df_clean["SexuponOutcome"].fillna(self.sex_mode_)
+        if "SexuponOutcome" in X_clean.columns:
+            n_missing_sex = X_clean["SexuponOutcome"].isna().sum()
+            X_clean["SexuponOutcome"] = X_clean["SexuponOutcome"].fillna(self.sex_mode_)
             if n_missing_sex:
                 logger.info(
                     "Imputed %d missing SexuponOutcome -> mode '%s'",
@@ -193,8 +193,8 @@ class DataCleaner(TransformerMixin, BaseEstimator):
                     self.sex_mode_,
                 )
 
-        if "AgeuponOutcome" in df_clean.columns:
-            age_days = extract_age_in_days(df_clean["AgeuponOutcome"])
+        if "AgeuponOutcome" in X_clean.columns:
+            age_days = extract_age_in_days(X_clean["AgeuponOutcome"])
             n_missing_age = age_days.isna().sum()
             age_days = age_days.fillna(self.age_median_)
             if n_missing_age:
@@ -203,6 +203,6 @@ class DataCleaner(TransformerMixin, BaseEstimator):
                     n_missing_age,
                     self.age_median_,
                 )
-            df_clean["log_age_in_days"] = np.log1p(age_days)
-            df_clean = df_clean.drop(columns=["AgeuponOutcome"])
-        return df_clean
+            X_clean["log_age_in_days"] = np.log1p(age_days)
+            X_clean = X_clean.drop(columns=["AgeuponOutcome"])
+        return X_clean
