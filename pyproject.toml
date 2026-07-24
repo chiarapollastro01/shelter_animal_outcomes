@@ -3,3 +3,10 @@ exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
 ]
+
+[tool.pytest.ini_options]
+# Ignore PendingDeprecationWarnings triggered internally by Seaborn
+# in EDA test suite 
+filterwarnings = [
+    "ignore::PendingDeprecationWarning:seaborn.*",
+]
