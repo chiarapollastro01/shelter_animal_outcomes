@@ -99,14 +99,17 @@ class TemporalFeaturesExtractor(TransformerMixin, BaseEstimator):
         X_out[self.datetime_col] = pd.to_datetime(X_out[self.datetime_col])
         dt_series = X_out[self.datetime_col]
         two_pi = 2 * np.pi
+        HOUR_FACTOR = two_pi / 24.0
+        WDAY_FACTOR = two_pi / 7.0
+        DOY_FACTOR = two_pi / 365.25
 
         hours = dt_series.dt.hour
-        X_out["Hour_sin"] = np.sin(two_pi * hours / 24)
-        X_out["Hour_cos"] = np.cos(two_pi * hours / 24)
+        X_out["Hour_sin"] = np.sin(hours * HOUR_FACTOR)
+        X_out["Hour_cos"] = np.cos(hours * HOUR_FACTOR)
 
         weekday = dt_series.dt.dayofweek
-        X_out["Wday_sin"] = np.sin(two_pi * weekday / 7)
-        X_out["Wday_cos"] = np.cos(two_pi * weekday / 7)
+        X_out["Wday_sin"] = np.sin(weekday * WDAY_FACTOR)
+        X_out["Wday_cos"] = np.cos(weekday * WDAY_FACTOR)
 
 
         X_out["IsWeekend"] = np.where(
@@ -116,8 +119,8 @@ class TemporalFeaturesExtractor(TransformerMixin, BaseEstimator):
         )
 
         doy = dt_series.dt.dayofyear
-        X_out["DoY_sin"] = np.sin(two_pi * doy / 365.25)
-        X_out["DoY_cos"] = np.cos(two_pi * doy / 365.25)
+        X_out["DoY_sin"] = np.sin(doy * DOY_FACTOR)
+        X_out["DoY_cos"] = np.cos(doy * DOY_FACTOR)
 
 
         return X_out.drop(columns=[self.datetime_col])
