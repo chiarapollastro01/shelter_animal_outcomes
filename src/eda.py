@@ -1,10 +1,12 @@
 """Exploratory Data Analysis script for the Shelter Animal Outcomes dataset.
 
 Loads the raw dataset, performs feature enrichment (age in days, temporal breakdowns),
-and computes statistical distributions. Generates a comprehensive suite of publication-ready
-visualization plots—including target imbalances, missing value profiles, species-split age
-distributions, binned high-cardinality features, and temporal trends—and persists them to disk
-without displaying.
+and computes statistical distributions. Generates a comprehensive suite
+of plots, including target imbalances, missing value profiles, species-split age
+distributions, species-split sex distributions, top breed and color categories, and temporal trends; and
+persists them to disk in parallel using multithreading without displaying.
+
+Explanations about these generated visualizations are documented in the accompanying EDA report (`reports/eda.md`).
 
 CLI Usage
 ---------
@@ -18,17 +20,16 @@ python -m src.eda data/raw_data/train.csv --figures-dir reports/figures
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import logging
 from pathlib import Path
 from typing import Any
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
 import pandas as pd
 import seaborn as sns
 
-from src.feature_engineering import RareCategoriesGrouper, extract_primary_breed
 from src.preprocessing import extract_age_in_days
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ def add_eda_features(X: pd.DataFrame) -> pd.DataFrame:
     """
     X = X.copy()
     X["age_in_days"] = extract_age_in_days(X["AgeuponOutcome"])
-    X["DateTime"] = pd.to_datetime(X["DateTime"])
+    X["DateTime"] = pd.to_datetime(X["DateTime"], format="%Y-%m-%d %H:%M:%S")
     X["Month"] = X["DateTime"].dt.month
     X["Hour"] = X["DateTime"].dt.hour
     
@@ -105,6 +106,8 @@ def add_eda_features(X: pd.DataFrame) -> pd.DataFrame:
 def split_by_species(X: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Partition DataFrame into separate sub-frames per species ('Dog', 'Cat').
 
+    Only species with at least 1 row present in X will be included.
+
     Parameters
     ----------
     X : pd.DataFrame
@@ -113,19 +116,19 @@ def split_by_species(X: pd.DataFrame) -> dict[str, pd.DataFrame]:
     Returns
     -------
     dict[str, pd.DataFrame]
-        Dictionary mapping species names ('Dog', 'Cat') to their respective DataFrame subsets.
+        Dictionary mapping species names ('Dog', 'Cat') to their respective non-empty DataFrame subsets.
     """
     return {
-        species: X[X["AnimalType"] == species].copy()
+        species: sub
         for species in SPECIES_COLORS
-        if species in SPECIES_COLORS
+        if not (sub := X[X["AnimalType"] == species].copy()).empty
     }
 
 
 def compute_outcome_crosstab(
     X: pd.DataFrame, feature: str, normalize: str = "index"
 ) -> pd.DataFrame:
-    """Compute cross-tabulation of a target feature against OutcomeType.
+    """Compute cross-tabulation of a target feature against OutcomeType safely.
 
     Parameters
     ----------
@@ -134,24 +137,30 @@ def compute_outcome_crosstab(
     feature : str
         Name of the feature column to cross-tabulate against 'OutcomeType'.
     normalize : str, default="index"
-        Normalization strategy passed to `pd.crosstab` ('index', 'columns', or 'all').
+        Normalization strategy ('index', 'columns', 'all', or None for raw counts).
 
     Returns
     -------
     pd.DataFrame
         Cross-tabulated frequency or proportion table.
     """
+    if X.empty:
+        return pd.DataFrame()
+
     ct = (
         X.groupby([feature, TARGET_COL], observed=False)
         .size()
         .unstack(fill_value=0)
     )
     if normalize == "index":
-        return ct.div(ct.sum(axis=1), axis=0)
+        row_sums = ct.sum(axis=1)
+        return ct.div(row_sums.replace(0, 1), axis=0).fillna(0)
     elif normalize == "columns":
-        return ct.div(ct.sum(axis=0), axis=1)
+        col_sums = ct.sum(axis=0)
+        return ct.div(col_sums.replace(0, 1), axis=1).fillna(0)
     elif normalize == "all":
-        return ct / ct.values.sum()
+        total = ct.values.sum()
+        return (ct / total).fillna(0) if total > 0 else ct
     return ct
 
 
@@ -169,35 +178,6 @@ def compute_age_percentiles(X: pd.DataFrame) -> pd.Series:
         Series of quantile values corresponding to `AGE_PERCENTILES` (0.5 to 0.999).
     """
     return X["age_in_days"].dropna().quantile(list(AGE_PERCENTILES))
-
-
-def compute_binned_frequencies(
-    series: pd.Series, max_other_ratio: float = 0.15
-) -> pd.Series:
-    """Compute normalized category frequencies after grouping rare labels into 'Other'.
-
-    Leverages `RareCategoriesGrouper` to mirror pipeline transformation logic and lists
-    the grouped 'Other' category last.
-
-    Parameters
-    ----------
-    series : pd.Series
-        Categorical Series to bin.
-    max_other_ratio : float, default=0.15
-        Maximum proportion threshold allowed for the 'Other' category.
-
-    Returns
-    -------
-    pd.Series
-        Normalized category frequencies with 'Other' placed at the end of the index.
-    """
-    frame = series.rename("value").to_frame()
-    grouper = RareCategoriesGrouper(columns=["value"], max_other_ratio=max_other_ratio)
-    binned = grouper.fit_transform(frame)["value"]
-    freqs = binned.value_counts(normalize=True)
-    if "Other" in freqs.index:
-        freqs = pd.concat([freqs.drop("Other"), freqs.loc[["Other"]]])
-    return freqs
 
 
 # ---------------------------------------------------------------------------
@@ -288,10 +268,16 @@ def plot_outcome_by_feature(
     tuple[plt.Figure, plt.Axes]
         Matplotlib Figure and Axes objects containing the rendered plot.
     """
-    ct = compute_outcome_crosstab(X, feature)
-
     fig, ax = plt.subplots(figsize=figsize)
-    ct.plot(kind="bar", stacked=True, ax=ax, colormap="Set2")
+    if X.empty:
+        ax.set_title(title, fontweight="bold")
+        fig.tight_layout()
+        return fig, ax
+
+    ct = compute_outcome_crosstab(X, feature)
+    if not ct.empty:
+        ct.plot(kind="bar", stacked=True, ax=ax, colormap="Set2")
+    
     ax.set_title(title, fontweight="bold")
     ax.set_ylabel("Proportion")
     ax.set_xlabel(feature)
@@ -374,43 +360,6 @@ def plot_top_categories(
     fig.tight_layout()
     return fig, ax
 
-
-def plot_binned_frequencies(
-    freqs: pd.Series, title: str, palette: str = "plasma",
-    figsize: tuple[int, int] = (8, 7),
-) -> tuple[plt.Figure, plt.Axes]:
-    """Horizontal bar chart of binned category frequencies with percentage labels.
-
-    Parameters
-    ----------
-    freqs : pd.Series
-        Series of normalized category frequencies.
-    title : str
-        Title for the plot.
-    palette : str, default="plasma"
-        Seaborn color palette name.
-    figsize : tuple[int, int], default=(8, 7)
-        Dimensions of the output figure.
-
-    Returns
-    -------
-    tuple[plt.Figure, plt.Axes]
-        Matplotlib Figure and Axes objects containing the rendered plot.
-    """
-    fig, ax = plt.subplots(figsize=figsize)
-    sns.barplot(x=freqs.values, y=freqs.index, ax=ax,
-                hue=freqs.index, palette=palette, legend=False)
-    ax.set_title(title, fontweight="bold", pad=10)
-    ax.set_xlabel("Relative Frequency")
-    ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-    for container in ax.containers:
-        ax.bar_label(container, fmt=lambda v: f"{v * 100:.1f}%",
-                     padding=4, fontsize=8.5)
-    sns.despine(fig=fig, top=True, right=True)
-    fig.tight_layout()
-    return fig, ax
-
-
 def plot_temporal_outcomes(
     X: pd.DataFrame, species: str, figsize: tuple[int, int] = (18, 5)
 ) -> tuple[plt.Figure, Any]:
@@ -438,10 +387,10 @@ def plot_temporal_outcomes(
         "Hour": "Hour of Day",
     }
 
-    # Scompattiamo sia la chiave (feature) che il valore (display_name)
     for ax, (feature, display_name) in zip(axes, temporal_features.items()):
         ct = compute_outcome_crosstab(X, feature)
-        ct.plot(kind="bar", stacked=True, ax=ax, colormap="Set2", legend=False)
+        if not ct.empty:
+            ct.plot(kind="bar", stacked=True, ax=ax, colormap="Set2", legend=False)
         ax.set_title(
             f"Outcome by {display_name} ({species}s)",
             fontsize=14,
@@ -453,13 +402,14 @@ def plot_temporal_outcomes(
     axes[0].set_ylabel("Proportion")
 
     handles, labels = axes[-1].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        title=TARGET_COL,
-        loc="center left",
-        bbox_to_anchor=(0.91, 0.85),
-    )
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            title=TARGET_COL,
+            loc="center left",
+            bbox_to_anchor=(0.91, 0.85),
+        )
     fig.tight_layout(rect=[0, 0, 0.9, 1])
     return fig, axes
 
@@ -467,8 +417,27 @@ def plot_temporal_outcomes(
 # Orchestration & CLI
 # ---------------------------------------------------------------------------
 
+def _save_single_figure(args: tuple[str, plt.Figure, Path]) -> Path:
+    """Helper worker function to save a single figure to disk in a separate thread.
+
+    Parameters
+    ----------
+    args : tuple[str, plt.Figure, Path]
+        Tuple containing figure name, Matplotlib Figure object, and target directory Path.
+
+    Returns
+    -------
+    Path
+        Path object of the saved figure on disk.
+    """
+    name, fig, figures_dir = args
+    path = figures_dir / f"{name}.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    return path
+
 def save_figures(X: pd.DataFrame, figures_dir: Path) -> list[Path]:
-    """Render and save the complete set of EDA figures to disk.
+    """
+    Render and save the complete set of EDA figures to disk.
 
     Parameters
     ----------
@@ -482,6 +451,7 @@ def save_figures(X: pd.DataFrame, figures_dir: Path) -> list[Path]:
     list[Path]
         Sorted list of file paths written to disk.
     """
+
     figures_dir.mkdir(parents=True, exist_ok=True)
     X_eda = add_eda_features(X)
     by_species = split_by_species(X_eda)
@@ -491,35 +461,31 @@ def save_figures(X: pd.DataFrame, figures_dir: Path) -> list[Path]:
         "outcome_by_animal_type": plot_outcome_by_feature(
             X, "AnimalType", "Outcome Distribution by AnimalType")[0],
     }
+    
     missing = plot_missing_values(X)
     if missing is not None:
         figures["missing_values"] = missing[0]
 
     for species, X_species in by_species.items():
         key = species.lower()
-        figures[f"age_distribution_{key}"] = plot_age_distribution(
-            X_species, species)[0]
-        figures[f"top_breeds_{key}"] = plot_top_categories(
-            X_species, "Breed", species)[0]
-        figures[f"top_colors_{key}"] = plot_top_categories(
-            X_species, "Color", species)[0]
-        figures[f"temporal_outcomes_{key}"] = plot_temporal_outcomes(
-            X_species, species)[0]
+        figures[f"age_distribution_{key}"] = plot_age_distribution(X_species, species)[0]
+        figures[f"outcome_by_sex_{key}"] = plot_outcome_by_feature(
+            X_species, "SexuponOutcome", f"Outcome Distribution by Sex upon Outcome ({species}s)"
+        )[0]
+        figures[f"top_breeds_{key}"] = plot_top_categories(X_species, "Breed", species)[0]
+        figures[f"top_colors_{key}"] = plot_top_categories(X_species, "Color", species)[0]
+        figures[f"temporal_outcomes_{key}"] = plot_temporal_outcomes(X_species, species)[0]
 
-        primary_breed_freqs = compute_binned_frequencies(
-            extract_primary_breed(X_species["Breed"]))
-        figures[f"primary_breed_binned_{key}"] = plot_binned_frequencies(
-            primary_breed_freqs, f"Primary Breed Distribution - {species}s",
-            palette="plasma" if species == "Dog" else "viridis")[0]
+    items = [(name, fig, figures_dir) for name, fig in figures.items()]
 
-    written = []
-    for name, fig in figures.items():
-        path = figures_dir / f"{name}.png"
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        written.append(path)
+    # Salvataggio parallelo su disco
+    with ThreadPoolExecutor() as executor:
+        written = list(executor.map(_save_single_figure, items))
 
-    logger.info("Saved %d figures to %s", len(written), figures_dir)
+    # Pulizia sicura di tutte le figure nel thread principale
+    plt.close("all")
+
+    logger.info("Saved %d figures to %s in parallel", len(written), figures_dir)
     return sorted(written)
 
 
