@@ -56,15 +56,15 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     if age_series.isnull().all():
         return pd.Series(np.nan, index=age_series.index, dtype=float)
     
-    numeric_values = age_series.str.extract(r'(\d+)')[0].astype(float)
+    numeric_values = age_series.str.extract(r"(\d+(?:\.\d+)?)")[0].astype(float)
 
-    text = age_series.str.lower()
+    text = age_series.astype(str).str.lower()
     
     conds = [
-        text.str.contains('year', na=False),
-        text.str.contains('month', na=False),
-        text.str.contains('week', na=False),
-        text.str.contains('day', na=False)
+        text.str.contains(r"\byears?\b", na=False, regex=True),
+        text.str.contains(r"\bmonths?\b", na=False, regex=True),
+        text.str.contains(r"\bweeks?\b", na=False, regex=True),
+        text.str.contains(r"\bdays?\b", na=False, regex=True),
     ]
     choices = [365.0, 30.0, 7.0, 1.0]
     
@@ -96,13 +96,13 @@ class DataCleaner(TransformerMixin, BaseEstimator):
     Examples
     --------
     >>> import pandas as pd
-    >>> df = pd.DataFrame({
+    >>> X = pd.DataFrame({
     ...     "AnimalID": ["A1", "A2"],
     ...     "SexuponOutcome": ["Neutered Male", None],
     ...     "AgeuponOutcome": ["2 years", None]
     ... })
     >>> cleaner = DataCleaner()
-    >>> cleaner.fit_transform(df)
+    >>> cleaner.fit_transform(X)
       SexuponOutcome  log_age_in_days
     0  Neutered Male         6.594413
     1  Neutered Male         6.594413
@@ -205,4 +205,5 @@ class DataCleaner(TransformerMixin, BaseEstimator):
                 )
             X_clean["log_age_in_days"] = np.log1p(age_days)
             X_clean = X_clean.drop(columns=["AgeuponOutcome"])
+            
         return X_clean
