@@ -8,7 +8,7 @@ Exported Classes
 ----------------
 DataCleaner
     A scikit-learn compatible transformer that orchestrates column dropping,
-    imputations and log-transformation of age in days..
+    imputations and log-transformation of age in days.
 
 Exported Functions
 ------------------
@@ -22,6 +22,8 @@ import numpy as np
 import logging
 from dataclasses import dataclass, field
 from sklearn.base import TransformerMixin, BaseEstimator
+
+from src import config
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,7 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     if age_series.isnull().all():
         return pd.Series(np.nan, index=age_series.index, dtype=float)
     
-    numeric_values = age_series.str.extract(r"(\d+(?:\.\d+)?)")[0].astype(float)
+    numeric_values = age_series.str.extract(r"(\d+(?:\.\d+)?)")[0].rename(age_series.name).astype(float)
 
     text = age_series.astype(str).str.lower()
     
@@ -79,19 +81,19 @@ class DataCleaner(TransformerMixin, BaseEstimator):
 
     Orchestrates the initial cleaning phase of the pipeline by removing identifier
     column, imputing categorical features with fixed labels
-    or learned modes, and transforming textual ages into log-scaled numeric days.
+    or learned modes, and transforming ages into log-scaled numeric days.
 
     Parameters
     ----------
-    columns_to_remove : list[str], default=["AnimalID"]
+    columns_to_remove : list[str], default=config.COLUMNS_TO_REMOVE
         List of column names to drop from input DataFrames to prevent noise.
 
     Attributes
     ----------
     sex_mode_ : str | None
-        The most frequent value learned from 'SexuponOutcome' during fitting.
+        The most frequent value learned from sex column during fitting.
     age_median_ : float | None
-        The median age in days learned from 'AgeuponOutcome' during fitting.
+        The median age in days learned from age column during fitting.
 
     Examples
     --------
@@ -108,9 +110,13 @@ class DataCleaner(TransformerMixin, BaseEstimator):
     1  Neutered Male         6.594413
 
     """
-
+    sex_col: str = config.SEX_COL
+    age_col: str = config.AGE_COL
+    fill_targets: tuple[str, ...] = config.FILL_TARGETS
+    
     columns_to_remove: list[str] = field(
-    default_factory=lambda: ["AnimalID"])
+        default_factory=lambda: list(config.COLUMNS_TO_REMOVE)
+    )
 
     sex_mode_: str | None = field(default=None, init=False, repr=False)
     age_median_: float | None = field(default=None, init=False, repr=False)
@@ -131,14 +137,14 @@ class DataCleaner(TransformerMixin, BaseEstimator):
         DataCleaner
             Fitted instance of the transformer.
         """
-       if "SexuponOutcome" in X.columns:
-            modes = X["SexuponOutcome"].mode()
+       if self.sex_col in X.columns:
+            modes = X[self.sex_col].mode()
             self.sex_mode_ = modes.iloc[0] if not modes.empty else "Unknown"
        else:
             self.sex_mode_ = "Unknown"
 
-       if "AgeuponOutcome" in X.columns:
-            age_days = extract_age_in_days(X["AgeuponOutcome"])
+       if self.age_col in X.columns:
+            age_days = extract_age_in_days(X[self.age_col])
             valid_ages = age_days.dropna()
             self.age_median_ = float(valid_ages.median()) if not valid_ages.empty else 0.0
        else:
@@ -179,31 +185,33 @@ class DataCleaner(TransformerMixin, BaseEstimator):
         X_clean = X.copy()
         X_clean = X_clean.drop(columns=self.columns_to_remove, errors="ignore")
 
-        fill_targets = ("Name", "Breed", "Color")
-        fill_values = {col: "Unknown" for col in fill_targets if col in X_clean.columns}
+        fill_values = {col: "Unknown" for col in self.fill_targets if col in X_clean.columns}
         X_clean = X_clean.fillna(value=fill_values)
 
-        if "SexuponOutcome" in X_clean.columns:
-            n_missing_sex = X_clean["SexuponOutcome"].isna().sum()
-            X_clean["SexuponOutcome"] = X_clean["SexuponOutcome"].fillna(self.sex_mode_)
+        if self.sex_col in X_clean.columns:
+            n_missing_sex = X_clean[self.sex_col].isna().sum()
+            X_clean[self.sex_col] = X_clean[self.sex_col].fillna(self.sex_mode_)
             if n_missing_sex:
                 logger.info(
-                    "Imputed %d missing SexuponOutcome -> mode '%s'",
+                    "Imputed %d missing %s -> mode '%s'",
                     n_missing_sex,
+                    self.sex_col,
                     self.sex_mode_,
                 )
 
-        if "AgeuponOutcome" in X_clean.columns:
-            age_days = extract_age_in_days(X_clean["AgeuponOutcome"])
+        if self.age_col in X_clean.columns:
+            age_days = extract_age_in_days(X_clean[self.age_col])
             n_missing_age = age_days.isna().sum()
             age_days = age_days.fillna(self.age_median_)
             if n_missing_age:
                 logger.info(
-                    "Imputed %d missing AgeuponOutcome -> median %.1f days",
+                    "Imputed %d missing %s -> median %.1f days",
                     n_missing_age,
+                    self.age_col,   
                     self.age_median_,
                 )
+                
             X_clean["log_age_in_days"] = np.log1p(age_days)
-            X_clean = X_clean.drop(columns=["AgeuponOutcome"])
+            X_clean = X_clean.drop(columns=[self.age_col])
             
         return X_clean
