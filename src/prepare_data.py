@@ -6,7 +6,7 @@ removing data leakage columns (OutcomeType, OutcomeSubtype) before pipeline entr
 
 CLI Usage
 ---------
-Using default options:
+Using default options (run as a module from the project root):
     python -m src.prepare_data data/raw_data/train.csv
 
 Or specifying custom output directory and split parameters:
@@ -23,44 +23,52 @@ import logging
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 import pandas as pd
+from src import config
 
 logger = logging.getLogger(__name__)
 
-TARGET_COL = "OutcomeType"
-LEAKAGE_COLS = ("OutcomeType", "OutcomeSubtype")
-
 
 def prepare_and_split_data(
-    raw_csv_path: Path,
-    test_size: float = 0.2,
-    random_state: int = 42,
-) -> tuple[pd.DataFrame, pd.Series]:
+    raw_csv_path: Path = config.RAW_DATA_PATH,
+    test_size = config.DEFAULT_TEST_SIZE,
+    random_state = config.RANDOM_STATE,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """Read raw CSV, extract target, drop target leakage columns, and perform stratified train/test split.
 
     Parameters
     ----------
-    raw_csv_path : Path
+    raw_csv_path : Path, default=config.RAW_DATA_PATH
         Path to the raw train.csv file.
-        test_size : float, default=0.2
+    test_size : float, , default=config.DEFAULT_TEST_SIZE
         Proportion of the dataset to include in the test split.
-    random_state : int, default=42
+    random_state : int, default=config.RANDOM_STATE
         Controls the shuffling applied to the data before applying the split.
 
     Returns
     -------
-    tuple[pd.DataFrame, pd.Series]
+    tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]
         Tuple of (X_features, X_test, y_target, y_test).
+
+    Raises
+    ------
+    KeyError
+        If config.TARGET_COL is missing from the input CSV DataFrame.
     """
     logger.info("Reading raw dataset from %s", raw_csv_path)
     df = pd.read_csv(raw_csv_path)
 
-    if TARGET_COL not in df.columns:
-        raise KeyError(f"Target column '{TARGET_COL}' missing from input file.")
+    if config.TARGET_COL not in df.columns:
+        raise KeyError(f"Target column '{config.TARGET_COL}' missing from input file.")
 
-    y = df[TARGET_COL].rename("target")
+    y = df[config.TARGET_COL].rename("target")
 
-    cols_to_drop = [col for col in LEAKAGE_COLS if col in df.columns]
+    cols_to_drop = [col for col in config.LEAKAGE_COLS if col in df.columns]
     X = df.drop(columns=cols_to_drop)
+
+    if config.SPECIES_COL in X.columns:
+        strata = y.astype(str) + "_" + X[config.SPECIES_COL].astype(str)
+    else:
+        strata = y
 
     logger.info("Performing stratified train/test split (test_size=%.2f)...", test_size)
     X_train, X_test, y_train, y_test = train_test_split(
@@ -68,7 +76,7 @@ def prepare_and_split_data(
         y,
         test_size=test_size,
         random_state=random_state,
-        stratify=y,
+        stratify=strata,
     )
 
     logger.info(
@@ -80,21 +88,22 @@ def prepare_and_split_data(
 
 
 def main(
-    raw_csv_path: Path, output_dir: Path,
-    test_size: float = 0.2,
-    random_state: int = 42,
+    raw_csv_path: Path = config.RAW_DATA_PATH,
+    output_dir: Path = config.SPLIT_DATA_DIR,
+    test_size: float = config.DEFAULT_TEST_SIZE,
+    random_state: int = config.RANDOM_STATE,
 ) -> None:
     """Orchestrate the data preparation pipeline and write split datasets to disk.
 
     Parameters
     ----------
-    raw_csv_path : Path
-        Path to the input raw CSV file (e.g., data/raw_data/train.csv).
-    output_dir : Path
+    raw_csv_path : Path, default=config.RAW_DATA_PATH
+        Path to the input raw CSV file.
+    output_dir : Path, default=config.SPLIT_DATA_DIR
         Destination directory for the split CSV files.
-    test_size : float, default=0.2
+    test_size : float, default=config.DEFAULT_TEST_SIZE
         Proportion of the dataset to include in the test split.
-    random_state : int, default=42
+    random_state : int, default=config.RANDOM_STATE
         Random seed for reproducibility.
     """
 
@@ -131,28 +140,35 @@ def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
     argparse.Namespace
         Parsed command-line arguments containing:
         - raw_csv_path (Path): Path to the input raw CSV file.
-        - output_features (Path): Destination path for extracted features.
-        - output_target (Path): Destination path for extracted target.
+        - output_dir (Path): Destination directory for the split CSV files.
+        - test_size (float): Proportion of the dataset to include in the test split.
+        - random_state (int): Random seed for reproducible splitting.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("raw_csv_path", type=Path, help="Path to raw train.csv")
+    parser.add_argument(
+        "raw_csv_path", 
+        type=Path, 
+        nargs="?",
+        default=config.RAW_DATA_PATH,
+        help="Path to raw train.csv",
+        )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("data/split_data"),
+        default=config.SPLIT_DATA_DIR,
         help="Directory where split files will be saved.",
     )
     parser.add_argument(
         "--test-size",
         type=float,
-        default=0.2,
-        help="Proportion of test set (default: 0.2)",
+        default=config.DEFAULT_TEST_SIZE,
+        help="Proportion of test set",
     )
     parser.add_argument(
         "--random-state",
         type=int,
-        default=42,
-        help="Random state for reproducibility (default: 42)",
+        default=config.RANDOM_STATE,
+        help="Random state for reproducibility",
     )
     
     return parser.parse_args(args_list)
