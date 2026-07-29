@@ -118,7 +118,7 @@ def test_extract_age_handles_null_values():
 
     result = extract_age_in_days(age_series)
 
-    pd.testing.assert_series_equal(result, expected)
+    pd.testing.assert_series_equal(result, expected, check_names=False)
 
 
 def test_extract_age_invalid_inputs():
@@ -149,7 +149,7 @@ def test_extract_age_all_null_series():
     
     result = extract_age_in_days(age_series)
     
-    pd.testing.assert_series_equal(result, expected)
+    pd.testing.assert_series_equal(result, expected, check_names=False)
 
 def test_extract_age_empty_series():
     """ Verify behavior when processing an empty pandas Series.
@@ -165,14 +165,16 @@ def test_extract_age_empty_series():
     result = extract_age_in_days(empty_series)
     
     assert result.empty
-    pd.testing.assert_series_equal(result, expected)
+    pd.testing.assert_series_equal(result, expected, check_names=False)
 
 
 # =====================================================================
 #                       DATA CLEANER TESTS
 # =====================================================================
-
-def test_datacleaner_fit_returns_self(train_X):
+# -----------------------TEST FIT------------------------------------------------------------------
+class TestDataCleanerFit:
+  
+  def test_datacleaner_returns_self(self, train_X):
     """ Verify that DataCleaner.fit returns the fitted transformer instance.
     
     GIVEN: an unfitted DataCleaner
@@ -182,58 +184,50 @@ def test_datacleaner_fit_returns_self(train_X):
     cleaner = DataCleaner()
     assert cleaner.fit(train_X) is cleaner
 
-def test_datacleaner_custom_columns_to_remove(train_X):
-    """ Verify column dropping logic in DataCleaner.
+  def test_datacleaner_learns_correct_statistics(self, train_X):
+       """Verify that fit learns exact mode for sex ('Neutered Male') and median age (730.0 days).
 
-    GIVEN: a DataCleaner initialised with a custom columns_to_remove list
-    WHEN: fit and transform are executed
-    THEN: only the requested columns are dropped 
+        GIVEN: a training DataFrame with known sex mode ('Neutered Male') and median age (730.0 days)
+        WHEN: fit is executed
+        THEN: sex_mode_ is set to 'Neutered Male' and age_median_ is set to 730.0
+        """
+       cleaner = DataCleaner().fit(train_X)
+       assert cleaner.sex_mode_ == "Neutered Male"
+       assert cleaner.age_median_ == 730.0
+
+  def test_datacleaner_handles_all_nan_columns(self):
+     """Verify fallback statistics learned when columns contain only NaN values.
+
+      GIVEN: a DataFrame where sex and age columns contain only missing values (NaN)
+      WHEN: fit is executed
+      THEN: safe default fallbacks are learned (sex_mode_='Unknown', age_median_=0.0)
+     """
+     X_mock = pd.DataFrame({config.SEX_COL: [np.nan, np.nan], config.AGE_COL: [np.nan, np.nan]})
+     cleaner = DataCleaner().fit(X_mock)
+
+     assert cleaner.sex_mode_ == "Unknown"
+     assert cleaner.age_median_ == 0.0
+
+  def test_datacleaner_without_sex_and_age_columns(self):
+    """ Verify fallback statistics learned when sex and age columns are absent during fit.
+
+    GIVEN: a DataFrame without sex and age columns
+    WHEN: fit is executed
+    THEN: safe fallbacks are learned ('Unknown', 0.0) 
     """
-    cleaner = DataCleaner(columns_to_remove=[config.NAME_COL])
-    X_clean = cleaner.fit(train_X).transform(train_X)
+    X_mock = pd.DataFrame({config.BREED_COL: ["Beagle"], config.COLOR_COL: ["Black"]})
 
-    assert config.NAME_COL not in X_clean.columns
-    assert config.ID_COL in X_clean.columns 
+    cleaner = DataCleaner().fit(X_mock)
 
-
-def test_datacleaner_column_dropping(fitted_cleaner, train_X):
-    """Verify automatic removal of identifier and raw age columns.
-
-    GIVEN: a fitted cleaner and a frame containing AnimalID
-    WHEN: transform is executed
-    THEN: identifier and age columns are removed, log_age_in_days is added
-    """
-
-    X_clean = fitted_cleaner.transform(train_X)
-
-    assert config.ID_COL not in X_clean.columns
-    assert config.AGE_COL not in X_clean.columns
-    assert "log_age_in_days" in X_clean.columns
+    assert cleaner.sex_mode_ == "Unknown"
+    assert cleaner.age_median_ == 0.0
 
 
-def test_datacleaner_prevents_data_leakage(train_X):
-    """ Verify that test set imputation uses learned statistics from training data.
+#-------------------------------TEST TRANSFORM--------------------------------------------
 
-    GIVEN: a training DataFrame with specific median age (2 years = 730 days) and sex mode (Neutered Male)
-           and a test DataFrame with missing values
-    WHEN: fit is called on train, and transform is called on test
-    THEN: the test DataFrame is imputed using train statistics, completely preventing data leakage
-    """
-
-    X_test = pd.DataFrame(
-        {config.SEX_COL: [np.nan], config.AGE_COL: [np.nan]}, index=[99]
-    )
-
-    cleaner = DataCleaner().fit(train_X)
-    X_test_clean = cleaner.transform(X_test)
-
-    assert X_test_clean[config.SEX_COL].iloc[0] == "Neutered Male"
-    assert np.isclose(
-        X_test_clean["log_age_in_days"].iloc[0], np.log1p(730.0), atol=1e-7
-    )
-
-
-def test_datacleaner_raises_runtime_error_if_unfitted():
+class TestDataCleanerTransform:
+     
+  def test_datacleaner_transform_raises_runtime_error_if_unfitted(self):
     """ Verify that transform raises a RuntimeError if executed before fitting.
 
     GIVEN: a DataCleaner instance that has not been fitted
@@ -246,8 +240,22 @@ def test_datacleaner_raises_runtime_error_if_unfitted():
         cleaner.transform(pd.DataFrame({config.NAME_COL: ["Bella"]}))
 
 
-def test_datacleaner_name_imputation(fitted_cleaner, train_X):
-    """ Verify missing value imputation in the Name column.
+  def test_datacleaner_column_dropping(self, fitted_cleaner, train_X):
+     """Verify automatic removal of identifier and raw age columns.
+
+    GIVEN: a fitted cleaner and a frame containing identifier and age columns
+    WHEN: transform is executed
+    THEN: identifier and age columns are removed, log_age_in_days is added
+     """
+     X_clean = fitted_cleaner.transform(train_X)
+
+     assert config.ID_COL not in X_clean.columns
+     assert config.AGE_COL not in X_clean.columns
+     assert "log_age_in_days" in X_clean.columns
+
+
+  def test_datacleaner_name_imputation(self, fitted_cleaner, train_X):
+    """ Verify missing value imputation in the name column.
 
     GIVEN: a DataFrame with some null values (NaN) in the name column
     WHEN: transform is executed
@@ -259,8 +267,7 @@ def test_datacleaner_name_imputation(fitted_cleaner, train_X):
     assert X_clean[config.NAME_COL].isnull().sum() == 0
     assert X_clean.loc[20, config.NAME_COL] == "Unknown"
 
-
-def test_datacleaner_sex_imputation(fitted_cleaner, train_X):
+  def test_datacleaner_sex_imputation(self, fitted_cleaner, train_X):
     """ Verify missing value imputation in sex column using the learned mode.
 
     GIVEN: a DataFrame with a missing value in sex column where "Neutered
@@ -274,7 +281,7 @@ def test_datacleaner_sex_imputation(fitted_cleaner, train_X):
     assert X_clean.loc[40, config.SEX_COL] == "Neutered Male"
    
 
-def test_datacleaner_age_imputation(fitted_cleaner, train_X):
+  def test_datacleaner_age_imputation(self, fitted_cleaner, train_X):
     """ Verify missing age imputation with the fitted median followed by log1p transformation.
 
     GIVEN: a DataFrame with age column values whose valid median in days is 730.0
@@ -293,26 +300,43 @@ def test_datacleaner_age_imputation(fitted_cleaner, train_X):
         X_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7
     )
 
-def test_datacleaner_age_log_transformation():
-    """ Verify log1p transformation accuracy on complete, non-null age inputs.
+  def test_datacleaner_age_log_transformation(self, fitted_cleaner):
+    """Verify log1p transformation accuracy on complete, non-null age inputs using fitted_cleaner.
 
-    GIVEN: a DataFrame with valid age column entries ("0 days", "7 days") 
-    WHEN: fit and transform are executed
-    THEN: the resulting log_age_in_days column contains mathematically correct 
-          log1p values, and the original column is dropped, preserving index
-    """
-    
+        GIVEN: a fitted cleaner and a DataFrame with valid age entries ('0 days', '7 days')
+        WHEN: transform is executed
+        THEN: log_age_in_days contains mathematically correct log1p values and age column is dropped
+        """
     X_mock = pd.DataFrame({config.AGE_COL: ["0 days", "7 days"]}, index=[10, 20])
-    
-    
-    expected = pd.Series([np.log1p(0.0), np.log1p(7.0)], index=[10, 20], name="log_age_in_days")
 
-    X_clean = DataCleaner().fit(X_mock).transform(X_mock)
+    expected = pd.Series(
+        [np.log1p(0.0), np.log1p(7.0)], index=[10, 20], name="log_age_in_days"
+    )
 
+    X_clean = fitted_cleaner.transform(X_mock)
+
+    pd.testing.assert_series_equal(
+        X_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7
+    )
+
+
+  def test_datacleaner_age_unparseable_text(self):
+    """Verify that unparseable age strings are safely imputed using a set median.
+
+        GIVEN: a fitted cleaner and a DataFrame with unparseable age text (e.g. 'invalid_age')
+        WHEN: transform is executed
+        THEN: unparseable text is treated as NaN, imputed with fitted median, and log1p transformed
+    """
+    X_train = pd.DataFrame({config.AGE_COL: ["1 year"]})
+    cleaner = DataCleaner().fit(X_train)
+
+    X_test = pd.DataFrame({config.AGE_COL: ["invalid_age", "2 years"]})
+    X_clean = cleaner.transform(X_test)
+
+    expected = pd.Series([np.log1p(365.0), np.log1p(730.0)], name="log_age_in_days")
     pd.testing.assert_series_equal(X_clean["log_age_in_days"], expected, check_exact=False, atol=1e-7)
 
-
-def test_datacleaner_breed_color_preventive_imputation(fitted_cleaner, train_X):
+  def test_datacleaner_breed_color_preventive_imputation(self, fitted_cleaner, train_X):
     """ Verify preventive imputation of missing Breed and Color values with 'Unknown'.
 
     GIVEN: a DataFrame containing missing values (NaN) in both breed and color columns,
@@ -327,23 +351,7 @@ def test_datacleaner_breed_color_preventive_imputation(fitted_cleaner, train_X):
     assert X_clean.loc[10, config.COLOR_COL] == "Unknown"
 
 
-
-def test_datacleaner_fit_without_sex_and_age_columns():
-    """ Verify fallback statistics learned when SexuponOutcome and AgeuponOutcome are absent during fit.
-
-    GIVEN: a DataFrame without sex and age columns
-    WHEN: fit is executed
-    THEN: safe fallbacks are learned ('Unknown', 0.0) 
-    """
-    X_mock = pd.DataFrame({config.BREED_COL: ["Beagle"], config.COLOR_COL: ["Black"]})
-
-    cleaner = DataCleaner().fit(X_mock)
-
-    assert cleaner.sex_mode_ == "Unknown"
-    assert cleaner.age_median_ == 0.0
-
-
-def test_datacleaner_transform_without_sex_and_age_columns(fitted_cleaner):
+  def test_datacleaner_transform_without_sex_and_age_columns(self, fitted_cleaner):
     """ Verify safe transform execution when sex and age columns are absent.
 
     GIVEN: a fitted cleaner and a DataFrame without sex and age columns
@@ -358,7 +366,35 @@ def test_datacleaner_transform_without_sex_and_age_columns(fitted_cleaner):
     assert X_clean.loc[2, config.NAME_COL] == "Unknown"
 
 
-def test_datacleaner_all_nan():
+  def test_datacleaner_does_not_mutate_input(self, fitted_cleaner, train_X):
+    """ Verify that transform does not mutate the input DataFrame.
+
+    GIVEN: a fitted cleaner and an input DataFrame
+    WHEN: transform is executed
+    THEN: the input frame is unchanged 
+    """
+    original = train_X.copy(deep=True)
+
+    fitted_cleaner.transform(train_X)
+
+    pd.testing.assert_frame_equal(train_X, original)
+
+  def test_datacleaner_logs_imputation_details(self, fitted_cleaner, train_X, caplog):
+    """ Verify specific logging output for both sex and age columns imputations.
+
+    GIVEN: a fitted cleaner and a DataFrame with missing values in both sex and age columns
+    WHEN: transform is executed with INFO logging captured
+    THEN: distinct imputation events are logged for both sex and age columns
+    """
+    with caplog.at_level(logging.INFO):
+        fitted_cleaner.transform(train_X)
+
+    assert config.SEX_COL in caplog.text
+    assert config.AGE_COL in caplog.text
+
+#----------------------------------------END TO END, CUSTOM & EDGE CASES------------------------------------------------------
+class TestDataCleanerCustomAndE2E:
+  def test_datacleaner_all_nan(self):
     """ Verify robust handling of a DataFrame composed entirely of missing entries.
 
     GIVEN: a DataFrame where all elements are missing
@@ -387,15 +423,14 @@ def test_datacleaner_all_nan():
 
     pd.testing.assert_frame_equal(X_clean, expected)
 
-
-def test_datacleaner_empty_dataframe():
+  def test_datacleaner_empty_dataframe(self):
     """ Verify robust processing when fitting and transforming an empty DataFrame.
 
     GIVEN: an empty DataFrame with valid column headers
     WHEN: fit and transform are executed
     THEN: the output DataFrame is empty, schema is preserved, and default fallback states are learned
     """
-    X_mock = pd.DataFrame(columns=[config.NAME_COL, config.SEX_COL, config.AGE_COL])
+    X_mock = pd.DataFrame(columns=(config.NAME_COL, config.SEX_COL, config.AGE_COL))
     
     cleaner = DataCleaner().fit(X_mock)
     X_clean=cleaner.transform(X_mock)
@@ -406,21 +441,70 @@ def test_datacleaner_empty_dataframe():
     assert "log_age_in_days" in X_clean.columns
     assert config.AGE_COL not in X_clean.columns
 
-def test_datacleaner_does_not_mutate_input(fitted_cleaner, train_X):
-    """ Verify that transform does not mutate the input DataFrame.
 
-    GIVEN: a fitted cleaner and an input DataFrame
-    WHEN: transform is executed
-    THEN: the input frame is unchanged 
+  def test_datacleaner_prevents_data_leakage(self, train_X):
+    """ Verify that test set imputation uses learned statistics from training data.
+
+    GIVEN: a training DataFrame with specific median age (2 years = 730 days) and sex mode (Neutered Male)
+           and a test DataFrame with missing values
+    WHEN: fit is called on train, and transform is called on test
+    THEN: the test DataFrame is imputed using train statistics, completely preventing data leakage
     """
-    original = train_X.copy(deep=True)
 
-    fitted_cleaner.transform(train_X)
+    X_test = pd.DataFrame(
+        {config.SEX_COL: [np.nan], config.AGE_COL: [np.nan]}, index=[99]
+    )
 
-    pd.testing.assert_frame_equal(train_X, original)
+    cleaner = DataCleaner().fit(train_X)
+    X_test_clean = cleaner.transform(X_test)
+
+    assert X_test_clean[config.SEX_COL].iloc[0] == "Neutered Male"
+    assert np.isclose(
+        X_test_clean["log_age_in_days"].iloc[0], np.log1p(730.0), atol=1e-7
+    )
+
+  def test_datacleaner_custom_columns_to_remove(self, train_X):
+    """ Verify column dropping logic in DataCleaner.
+
+    GIVEN: a DataCleaner initialised with a custom list
+    WHEN: fit and transform are executed
+    THEN: only the requested columns are dropped 
+    """
+    cleaner = DataCleaner(columns_to_remove=(config.NAME_COL,))
+    X_clean = cleaner.fit_transform(train_X)
+
+    assert config.NAME_COL not in X_clean.columns
+    assert config.ID_COL in X_clean.columns 
 
 
-def test_datacleaner_custom_column_names():
+  def test_datacleaner_custom_fill_targets(self):
+    """Verify categorical missing value imputation with custom fill_targets.
+
+    GIVEN: a DataFrame with missing values in custom categorical columns
+    WHEN: DataCleaner is initialized with custom fill_targets tuple
+    THEN: missing values in specified columns are filled with 'Unknown', 
+          while untouched columns retain their original NaNs
+    """
+    X_mock = pd.DataFrame(
+        {
+            "custom_breed": ["Labrador", np.nan],
+            "custom_color": [np.nan, "Black"],
+            "other_col": [np.nan, "Keep_NaN"],
+        }
+    )
+
+    cleaner = DataCleaner(fill_targets=("custom_breed", "custom_color"))
+    X_clean = cleaner.fit_transform(X_mock)
+
+    assert X_clean["custom_breed"].isnull().sum() == 0
+    assert X_clean["custom_color"].isnull().sum() == 0
+    assert X_clean["custom_breed"].iloc[1] == "Unknown"
+    assert X_clean["custom_color"].iloc[0] == "Unknown"
+
+    assert X_clean["other_col"].isnull().sum() == 1
+
+
+  def test_datacleaner_custom_column_names(self):
     """Verify processing when using custom sex and age column names.
 
     GIVEN: a DataFrame with custom column names ('animal_sex', 'animal_age')
@@ -438,31 +522,3 @@ def test_datacleaner_custom_column_names():
     assert "log_age_in_days" in X_clean.columns
     assert "animal_age" not in X_clean.columns
     assert X_clean["animal_sex"].isnull().sum() == 0
-
-
-def test_datacleaner_logs_fit(train_X, caplog):
-    """ Verify logging output during the fit execution.
-
-    GIVEN: a DataCleaner instance and a training DataFrame
-    WHEN: fit is executed with INFO logging captured
-    THEN: the fitting statistics (sex_mode_ and age_median_) are logged
-    """
-    with caplog.at_level(logging.INFO):
-        DataCleaner().fit(train_X)
-
-    assert "Fitted DataCleaner" in caplog.text
-
-
-def test_datacleaner_logs_imputation_details(fitted_cleaner, train_X, caplog):
-    """ Verify specific logging output for both Ssex and age columns imputations.
-
-    GIVEN: a fitted cleaner and a DataFrame with missing values in both sex and age columns
-    WHEN: transform is executed with INFO logging captured
-    THEN: distinct imputation events are logged for both sex and age columns
-    """
-    with caplog.at_level(logging.INFO):
-        fitted_cleaner.transform(train_X)
-
-    assert "Imputed" in caplog.text
-    assert config.SEX_COL in caplog.text
-    assert config.AGE_COL in caplog.text
