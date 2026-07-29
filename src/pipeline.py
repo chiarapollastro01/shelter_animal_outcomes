@@ -26,28 +26,17 @@ from src.feature_engineering import (
 )
 from src.preprocessing import DataCleaner
 
+from src import config
+
 logger = logging.getLogger(__name__)
 
-RANDOM_STATE = 42
 
-# These names are produced by the feature-engineering step: if an
-# extractor renames its output, this is the only place to update.
-NUM_SCALE_COLS: tuple[str, ...] = (
-    "Hour_sin", "Hour_cos",
-    "Wday_sin", "Wday_cos",
-    "DoY_sin", "DoY_cos",
-    "log_age_in_days",
-)
-CAT_ENCODE_COLS: tuple[str, ...] = ("Breed", "Color", "Reproductive_Status")
-# Binary columns (IsWeekend, is_mix, has_name) are already 0/1: passthrough.
-
-# Registry: adding a model = adding one entry for eventual future modifications.
 _CLASSIFIERS: dict[str, Callable[[], ClassifierMixin]] = {
     "knn": lambda: KNeighborsClassifier(),
     "logistic_regression": lambda: LogisticRegression(
-        max_iter=1000, random_state=RANDOM_STATE
+        max_iter=1000, random_state=config.RANDOM_STATE
     ),
-    "random_forest": lambda: RandomForestClassifier(random_state=RANDOM_STATE),
+    "random_forest": lambda: RandomForestClassifier(random_state=config.RANDOM_STATE),
 }
 
 
@@ -78,12 +67,13 @@ def build_preprocess_transformer() -> ColumnTransformer:
             (
                 "onehot",
                 OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-                list(CAT_ENCODE_COLS),
+                list(config.CAT_ENCODE_COLS),
             ),
-            ("scale_num", MinMaxScaler(), list(NUM_SCALE_COLS)),
+            ("scale_num", MinMaxScaler(), list(config.NUM_SCALE_COLS)),
         ],
         remainder="passthrough",
     )
+
 
 
 def get_model_pipeline(model_type: str = "knn") -> ImbPipeline:
@@ -104,6 +94,14 @@ def get_model_pipeline(model_type: str = "knn") -> ImbPipeline:
     ValueError
         If *model_type* is not a registered classifier family.
     """
+    overlapping_cols = set(config.COLUMNS_TO_REMOVE) & set(config.ESSENTIAL_COLS)
+    if overlapping_cols:
+        raise ValueError(
+            "CRITICAL CONFIGURATION ERROR: COLUMNS_TO_REMOVE contains essential "
+            f"pipeline feature columns: {overlapping_cols}. "
+            "Remove these from config.COLUMNS_TO_REMOVE to prevent breaking downstream feature engineering."
+        )
+
     try:
         clf = _CLASSIFIERS[model_type]()
     except KeyError as exc:
@@ -117,12 +115,12 @@ def get_model_pipeline(model_type: str = "knn") -> ImbPipeline:
     return ImbPipeline([
         ("cleaner", DataCleaner()),
         ("temporal", TemporalFeaturesExtractor()),
-        ("categorical_eng", CategoricalFeaturesEngineer(max_other_ratio=0.15)),
+        ("categorical_eng", CategoricalFeaturesEngineer(max_other_ratio=config.MAX_OTHER_RATIO)),
         ("sex_eng", SexFeaturesExtractor()),
         ("name_eng", NameFeaturesExtractor()),
         ("onehot_and_scale", build_preprocess_transformer()),
         # SMOTE rebalances the classes inside the pipeline. It only runs only on the training folds 
         # (imblearn contract), so the validation folds always keep the true class distribution (no data leakage)
-        ("smote", SMOTE(random_state=RANDOM_STATE)),
+        ("smote", SMOTE(random_state=config.RANDOM_STATE)),
         ("clf", clf),
         ])
