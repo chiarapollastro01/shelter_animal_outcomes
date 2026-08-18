@@ -217,8 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Data folder
-data/
+# Data 
+data/raw_data/
+data/split_data/
 
 # Documentation Sphinx useless folders
 docs/source/_static
