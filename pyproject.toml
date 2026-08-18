@@ -1,17 +1,70 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shelter-animal-outcomes"
+version = "0.1.0"
+description = "Multi-class classification of shelter animal outcomes"
+# config.py annotates module-level constants without `from __future__ import
+# annotations`, so its type hints are evaluated at import time: 3.9 is the hard
+# floor. 3.10 is the declared one, since the codebase uses `X | None` freely.
+requires-python = ">=3.10"
+
+dependencies = [
+    "pandas>=2.3,<3",
+    "numpy>=2.2,<3",
+    "scikit-learn>=1.7,<2",
+    "imbalanced-learn>=0.14,<0.15",  # SMOTE and the imblearn Pipeline
+    "matplotlib>=3.10,<4",
+    "seaborn>=0.13,<0.14",
+    "joblib>=1.5,<2",                # imported directly for model persistence
+    "pyyaml>=6.0,<7",                # config.yaml is read by config.load_params
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1,<10",
+    "pytest-cov>=7.1,<8",
+    "mypy>=2.3,<3",
+    "pylint>=4.0,<5",
+    "hypothesis>=6.165,<7",
+]
+
+[tool.setuptools]
+# `src` is itself the package (it has an __init__.py), not a container of
+# packages: declaring it explicitly is what makes `from src import ...` work
+# from any working directory once the project is installed with `pip install -e .`
+packages = ["src"]
+
+
 [tool.coverage.report]
+# Ignore these lines from test coverage
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
 ]
 
+[tool.mypy]
+# sklearn, imblearn and joblib ship no type stubs: without this every import is
+# an error.
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 # Ignore PendingDeprecationWarnings triggered internally by Seaborn
-# in EDA test suite 
+# in the EDA test suite.
 filterwarnings = [
     "ignore::PendingDeprecationWarning:seaborn.*",
 ]
 
-[tool.mypy]
-ignore_missing_imports = true
-explicit_package_bases = true
-namespace_packages = true
+# Treat docstring examples as executable specifications: running them with the
+# suite means an example can no longer drift away from the code it documents.
+addopts = "--doctest-modules"
+
+# "src" is listed next to "tests" because that is where the examples live,
+# while "tests" remains the home of the test suite proper.
+testpaths = ["tests", "src"]
+
+# Doctests compare output character by character: normalising whitespace stops
+# a printed DataFrame from failing over a shift in column alignment.
+doctest_optionflags = ["NORMALIZE_WHITESPACE"]

@@ -60,9 +60,9 @@ def prepare_and_split_data(
     if config.TARGET_COL not in df.columns:
         raise KeyError(f"Target column '{config.TARGET_COL}' missing from input file.")
 
-    y = df[config.TARGET_COL].rename("target")
+    y = df[config.TARGET_COL]
 
-    cols_to_drop = [col for col in config.LEAKAGE_COLS if col in df.columns]
+    cols_to_drop = [col for col in config.NON_FEATURE_COLS if col in df.columns]
     X = df.drop(columns=cols_to_drop)
 
     if config.SPECIES_COL in X.columns:

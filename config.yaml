@@ -1,0 +1,39 @@
+# Run parameters for the Shelter Animal Outcomes analysis.
+
+# Everything that describes a run lives here, the dataset schema stays in
+# src/config.py.
+
+# prepare_data: proportion of the raw dataset held out as the final test set.
+test_size: 0.2
+
+# train: proportion of each species' training data kept aside inside the
+# tournament, never seen by the grid search.
+holdout_size: 0.2
+
+# train: folds of the stratified cross-validation.
+cv_n_splits: 5
+
+# train: metrics computed at every grid point.
+scoring: ["f1_macro", "balanced_accuracy", "accuracy"]
+
+# train: the one metric among those above that selects the winner and that the
+# best estimator is refit on. Must be one of the entries in `scoring`.
+refit: "f1_macro"
+ 
+# train, via merge_search_grids: the grid GridSearchCV explores, one entry per classifier family.
+search_spaces:
+  common:
+    categorical_eng__max_other_ratio: [0.10, 0.15, 0.20]
+    smote__k_neighbors: [3, 5]
+ 
+  knn:
+    clf__n_neighbors: [3, 5, 11]
+    clf__weights: ["uniform", "distance"]
+ 
+  logistic_regression:
+    clf__C: [0.1, 1.0, 10.0]
+    clf__max_iter: [1000]    
+ 
+  random_forest:
+    clf__n_estimators: [100, 200]
+    clf__max_depth: [null, 15, 30]
