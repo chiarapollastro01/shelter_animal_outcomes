@@ -16,12 +16,18 @@ extract_age_in_days(age_series: pd.Series) -> pd.Series
     Function that parses textual age strings
     (e.g., '2 years', '3 weeks') into equivalent numeric float days.
 
+drop_rows_missing_critical(X, y, critical_cols) -> tuple[pd.DataFrame, pd.Series]
+    Function that removes the rows whose critical columns are missing or
+    unusable, keeping features and target aligned. Runs outside the
+    scikit-learn pipeline, since a transformer cannot drop rows without
+    desynchronising X from y.
+
 Note on the module boundary
 ---------------------------
 Creating log_age_in_days is, strictly speaking, feature engineering: it
 derives a new column rather than repairing an existing one. It lives here
 because the age column is treated as a whole: the raw text is parsed into
-days, the gaps are filled with the median learned during fit, and the
+days, the gaps are filled with the median learned during ``fit``, and the
 logarithm is applied to that same scale. 
 """
 from __future__ import annotations
@@ -91,6 +97,63 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     units = text.str.extract(_UNIT_PATTERN, expand=False)
 
     return (numeric_values * units.map(DAYS_PER_UNIT)).astype(float)
+
+
+def drop_rows_missing_required(
+    X: pd.DataFrame,
+    y: pd.Series,
+    row_required_cols: tuple[str, ...] = config.ROW_REQUIRED_COLS,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Function that removes the rows whose required columns are missing or unusable.
+
+    Parameters
+    ----------
+    X : pd.DataFrame
+        Feature matrix.
+    y : pd.Series
+        Target values, aligned with `X`.
+    row_required_cols : tuple[str, ...], default=config.ROW_REQUIRED_COLS
+        Columns without which a row cannot be used at all.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.Series]
+        The surviving rows, both re-indexed from zero.
+    
+    Raises
+    ------
+    KeyError
+        If any of row_required_cols is absent from X
+        Examples
+    --------
+    >>> import pandas as pd
+    >>> X = pd.DataFrame({
+    ...     "DateTime": ["2015-01-01 10:00:00", "not a date", "2015-01-03 12:00:00"],
+    ...     "AnimalType": ["Dog", "Cat", None],
+    ... })
+    >>> y = pd.Series(["Adoption", "Transfer", "Adoption"])
+    >>> X_clean, y_clean = drop_rows_missing_required(X, y)
+    >>> X_clean
+                  DateTime AnimalType
+    0  2015-01-01 10:00:00        Dog
+    >>> list(y_clean)
+    ['Adoption']
+    """
+    mask = X[list(row_required_cols)].notna().all(axis=1)
+
+    # notna() above only catches empty cells: a string like "not a date" is not
+    # empty, so it survives. Therefore:
+    if config.DATETIME_COL in X.columns:
+        mask &= pd.to_datetime(X[config.DATETIME_COL], errors="coerce").notna()
+
+    n_dropped = int((~mask).sum())
+    if n_dropped:
+        logger.info(
+            "Dropped %d rows with missing or unparsable columns %s",
+            n_dropped, row_required_cols,
+        )
+
+    return X.loc[mask].reset_index(drop=True), y.loc[mask].reset_index(drop=True)
  
 @dataclass
 class DataCleaner(BaseEstimator, TransformerMixin):
@@ -136,7 +199,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
     Notes
     -----
     The column names read from the input are configurable, but the name of the
-    column written out is not: it is fixed to config.LOG_AGE_COL, which is
+    column written out is not: it is fixed to config.LOG_AGE_COL``, which is
     the name the ColumnTransformer downstream looks for when scaling.
 
     """
@@ -241,4 +304,5 @@ class DataCleaner(BaseEstimator, TransformerMixin):
             X_clean = X_clean.drop(columns=[self.age_col])
             
         return X_clean
+
 

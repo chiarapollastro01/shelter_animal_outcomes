@@ -7,7 +7,7 @@ from sklearn.exceptions import NotFittedError
 import pytest
 import pandas as pd
 from src import config
-from src.preprocessing import extract_age_in_days, DataCleaner
+from src.preprocessing import drop_rows_missing_required, extract_age_in_days, DataCleaner
 
 # =====================================================================
 #                              FIXTURES 
@@ -527,3 +527,106 @@ class TestDataCleanerCustomAndE2E:
 
 
 
+# =====================================================================
+#                 drop_rows_missing_critical TESTS
+# =====================================================================
+
+@pytest.fixture
+def rows_with_defects() -> tuple[pd.DataFrame, pd.Series]:
+    """Features and target where three rows are unusable for a different reason.
+
+    One row misses the timestamp, one misses the species, and one carries a
+    timestamp that is present but cannot be parsed.
+    """
+    X = pd.DataFrame(
+        {
+            config.DATETIME_COL: [
+                "2026-01-01 10:00:00",
+                np.nan,
+                "2026-01-03 12:00:00",
+                "not a date",
+                "2026-01-05 14:00:00",
+            ],
+            config.SPECIES_COL: ["Dog", "Cat", np.nan, "Dog", "Cat"],
+        },
+        index=[10, 20, 30, 40, 50],
+    )
+    y = pd.Series(
+        ["Adoption", "Transfer", "Adoption", "Return_to_owner", "Transfer"],
+        index=[10, 20, 30, 40, 50],
+    )
+    return X, y
+
+class TestDropRowsMissingRequired:
+    """Testing the row-level filter that runs before the pipeline."""
+
+    def test_rows_missing_a_required_column_are_dropped(self, rows_with_defects):
+        """Verify that a missing timestamp or species removes the row.
+
+        GIVEN: features whose required columns are missing on two rows
+        WHEN: drop_rows_missing_required is executed
+        THEN: those rows are gone from both outputs, and no required value
+              is left missing
+        """
+        X, y = rows_with_defects
+
+        X_clean, y_clean = drop_rows_missing_required(X, y)
+
+        assert len(X_clean) == len(y_clean)
+        assert not X_clean[list(config.ROW_REQUIRED_COLS)].isna().any().any()
+
+    def test_unparsable_timestamp_is_dropped(self, rows_with_defects):
+        """Verify that a timestamp which is present but unreadable is dropped.
+
+        GIVEN: a row whose DateTime is a non-empty string that is not a date
+        WHEN: drop_rows_missing_required is executed
+        THEN: the row is gone, since notna() alone would have kept it and it
+              would have become NaT inside the pipeline
+        """
+        X, y = rows_with_defects
+
+        X_clean, _ = drop_rows_missing_required(X, y)
+
+        assert "not a date" not in set(X_clean[config.DATETIME_COL])
+
+    def test_surviving_rows_keep_their_labels(self, rows_with_defects):
+        """Verify that features and target stay aligned after filtering.
+
+        GIVEN: defective rows sitting at non-final positions
+        WHEN: drop_rows_missing_required is executed
+        THEN: each surviving row keeps the label it had before, which the
+              reset of both indices could otherwise silently break
+        """
+        X, y = rows_with_defects
+
+        X_clean, y_clean = drop_rows_missing_required(X, y)
+
+        assert list(y_clean) == ["Adoption", "Transfer"]
+        assert list(X_clean.index) == list(range(len(X_clean)))
+
+    def test_a_clean_frame_is_returned_untouched(self, rows_with_defects):
+        """Verify that nothing is dropped when every row is usable.
+
+        GIVEN: features with no missing or unparsable required values
+        WHEN: drop_rows_missing_required is executed
+        THEN: every row survives
+        """
+        X, y = rows_with_defects
+        X_ok, y_ok = drop_rows_missing_required(X, y)
+
+        X_again, y_again = drop_rows_missing_required(X_ok, y_ok)
+
+        assert len(X_again) == len(X_ok)
+
+    def test_absent_required_column_raises(self, rows_with_defects):
+        """Verify that a required column missing from the frame is an error.
+
+        GIVEN: a frame that does not carry one of the required columns
+        WHEN: drop_rows_missing_required is executed
+        THEN: a KeyError is raised, the presence of those columns being a
+              precondition rather than something to impute
+        """
+        X, y = rows_with_defects
+
+        with pytest.raises(KeyError):
+            drop_rows_missing_required(X.drop(columns=[config.SPECIES_COL]), y)
