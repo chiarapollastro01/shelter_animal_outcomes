@@ -1,8 +1,8 @@
 """
 Preprocessing module for the Shelter Animal Outcomes Dataset.
-
-This module provides the primary data cleaning pipeline and custom transformers 
-required to prepare raw data for machine learning algorithms. 
+This module provides the data cleaning steps that prepare raw shelter data for
+machine learning: the row-level filtering that has to happen before the
+pipeline, and the scikit-learn compatible transformer that runs inside it.
 
 Exported Classes
 ----------------
@@ -13,10 +13,19 @@ DataCleaner
 Exported Functions
 ------------------
 extract_age_in_days(age_series: pd.Series) -> pd.Series
-    Function that parses textual age strings 
+    Function that parses textual age strings
     (e.g., '2 years', '3 weeks') into equivalent numeric float days.
+
+Note on the module boundary
+---------------------------
+Creating log_age_in_days is, strictly speaking, feature engineering: it
+derives a new column rather than repairing an existing one. It lives here
+because the age column is treated as a whole: the raw text is parsed into
+days, the gaps are filled with the median learned during fit, and the
+logarithm is applied to that same scale. 
 """
 from __future__ import annotations
+from sklearn.exceptions import NotFittedError
 import pandas as pd
 import numpy as np
 import logging
@@ -27,10 +36,23 @@ from src import config
 
 logger = logging.getLogger(__name__)
 
+# Here 365 is used instead of 365.25, considering that the dataset already contains the writer's own rounding, so half a
+# day of extra precision would be invented, not measured.
+DAYS_PER_UNIT: dict[str, float] = {
+    "year": 365.0,
+    "month": 30.0,
+    "week": 7.0,
+    "day": 1.0,
+}
+
+_NUMBER_PATTERN = r"(\d+(?:\.\d+)?)"
+_UNIT_PATTERN = r"\b(year|month|week|day)s?\b"
+
 def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     """
     Convert a textual Series of age (e.g., '2 years') 
     into a numeric Series of days (float).
+
     
     Parameters
     ----------
@@ -55,27 +77,23 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     4      NaN
     dtype: float64
     """
-    if age_series.isnull().all():
-        return pd.Series(np.nan, index=age_series.index, dtype=float)
-    
-    numeric_values = age_series.str.extract(r"(\d+(?:\.\d+)?)")[0].rename(age_series.name).astype(float)
 
     text = age_series.astype(str).str.lower()
     
-    conds = [
-        text.str.contains(r"\byears?\b", na=False, regex=True),
-        text.str.contains(r"\bmonths?\b", na=False, regex=True),
-        text.str.contains(r"\bweeks?\b", na=False, regex=True),
-        text.str.contains(r"\bdays?\b", na=False, regex=True),
-    ]
-    choices = [365.0, 30.0, 7.0, 1.0]
-    
-    multipliers = np.select(conds, choices, default=np.nan)
+    numeric_values = pd.to_numeric(
+        text.str.extract(_NUMBER_PATTERN, expand=False),
+        errors="coerce"
+    )
 
-    return numeric_values * multipliers
+    # The unit is the first one appearing in the string. Compound values like
+    # "1 year 6 months" do not occur in this dataset, where every entry is a
+    # single number followed by a single unit.
+    units = text.str.extract(_UNIT_PATTERN, expand=False)
+
+    return (numeric_values * units.map(DAYS_PER_UNIT)).astype(float)
  
 @dataclass
-class DataCleaner(TransformerMixin, BaseEstimator):
+class DataCleaner(BaseEstimator, TransformerMixin):
     """
     Clean and impute raw shelter animal data for machine learning.
 
@@ -85,8 +103,14 @@ class DataCleaner(TransformerMixin, BaseEstimator):
 
     Parameters
     ----------
-    columns_to_remove : list[str], default=config.COLUMNS_TO_REMOVE
-        List of column names to drop from input DataFrames to prevent noise.
+    sex_col : str, default=config.SEX_COL
+            Name of the column containing sex and reproductive outcome data.
+    age_col : str, default=config.AGE_COL
+            Name of the column containing textual age values.
+    fill_targets : tuple[str, ...], default=config.FILL_TARGETS
+            Tuple of categorical column names to preventively fill missing values with 'Unknown'.
+    columns_to_remove : tuple[str, ...], default=config.COLUMNS_TO_REMOVE
+           Tuple of identifier or noisy column names to drop from input DataFrames
 
     Attributes
     ----------
@@ -109,20 +133,23 @@ class DataCleaner(TransformerMixin, BaseEstimator):
     0  Neutered Male         6.594413
     1  Neutered Male         6.594413
 
+    Notes
+    -----
+    The column names read from the input are configurable, but the name of the
+    column written out is not: it is fixed to config.LOG_AGE_COL, which is
+    the name the ColumnTransformer downstream looks for when scaling.
+
     """
     sex_col: str = config.SEX_COL
     age_col: str = config.AGE_COL
     fill_targets: tuple[str, ...] = config.FILL_TARGETS
-    
-    columns_to_remove: list[str] = field(
-        default_factory=lambda: list(config.COLUMNS_TO_REMOVE)
-    )
+    columns_to_remove: tuple[str, ...] = config.COLUMNS_TO_REMOVE
 
     sex_mode_: str | None = field(default=None, init=False, repr=False)
     age_median_: float | None = field(default=None, init=False, repr=False)
 
     def fit(self, X: pd.DataFrame, y=None) -> "DataCleaner":
-       """Learn imputation statistics (mode for sex, median age in days).
+        """Learn imputation statistics (mode for sex, median age in days).
 
         Parameters
         ----------
@@ -137,30 +164,29 @@ class DataCleaner(TransformerMixin, BaseEstimator):
         DataCleaner
             Fitted instance of the transformer.
         """
-       if self.sex_col in X.columns:
+        if self.sex_col in X.columns:
             modes = X[self.sex_col].mode()
             self.sex_mode_ = modes.iloc[0] if not modes.empty else "Unknown"
-       else:
+        else:
             self.sex_mode_ = "Unknown"
 
-       if self.age_col in X.columns:
-            age_days = extract_age_in_days(X[self.age_col])
-            valid_ages = age_days.dropna()
+        if self.age_col in X.columns:
+            valid_ages = extract_age_in_days(X[self.age_col]).dropna()
             self.age_median_ = float(valid_ages.median()) if not valid_ages.empty else 0.0
-       else:
+        else:
             self.age_median_ = 0.0
-       logger.info(
+        logger.info(
             "Fitted DataCleaner: sex_mode_='%s', age_median_=%.1f days",
             self.sex_mode_,
             self.age_median_,
-        )
-       return self
+         )
+        return self
     
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Apply learned statistics to clean and impute the dataset.
 
-        Drops specified columns, fills missing categorical values ('Name', 'Breed',
-        'Color', 'SexuponOutcome'), converts textual ages to days, imputes missing ages
+        Drops specified columns, fills missing categorical values (name, breed,
+        color and sex), converts textual ages to days, imputes missing ages
         with the fitted median, and applies a log(1 + x) transformation.
 
         Parameters
@@ -175,15 +201,15 @@ class DataCleaner(TransformerMixin, BaseEstimator):
         
         Raises
         ------
-        RuntimeError
+        NotFittedError
             If transform() is called before the transformer is fitted.
         """
         if self.sex_mode_ is None or self.age_median_ is None:
-            raise RuntimeError(
+            raise NotFittedError(
                 "DataCleaner instance is not fitted. Call 'fit' before 'transform'."
             )
         X_clean = X.copy()
-        X_clean = X_clean.drop(columns=self.columns_to_remove, errors="ignore")
+        X_clean = X_clean.drop(columns=list(self.columns_to_remove), errors="ignore")
 
         fill_values = {col: "Unknown" for col in self.fill_targets if col in X_clean.columns}
         X_clean = X_clean.fillna(value=fill_values)
@@ -211,7 +237,8 @@ class DataCleaner(TransformerMixin, BaseEstimator):
                     self.age_median_,
                 )
                 
-            X_clean["log_age_in_days"] = np.log1p(age_days)
+            X_clean[config.LOG_AGE_COL] = np.log1p(age_days)
             X_clean = X_clean.drop(columns=[self.age_col])
             
         return X_clean
+
