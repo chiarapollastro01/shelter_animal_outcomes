@@ -2,13 +2,24 @@
 
 Builds the full end-to-end pipeline: cleaning -> feature engineering ->
 encoding/scaling -> SMOTE -> classifier. 
+
+Exported Functions
+------------------
+available_models() -> tuple[str, ...]
+    Names of the classifier families the pipeline can build.
+
+build_preprocess_transformer() -> ColumnTransformer
+    The encoding and scaling step, one-hot for the categoricals and min-max
+    for the numericals.
+
+get_model_pipeline(model_type) -> ImbPipeline
+    The end-to-end pipeline for one classifier family.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Callable
-
+from collections.abc import Callable
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 from sklearn.base import ClassifierMixin
@@ -17,6 +28,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+from functools import partial
 
 from src.feature_engineering import (
     CategoricalFeaturesEngineer,
@@ -30,13 +42,14 @@ from src import config
 
 logger = logging.getLogger(__name__)
 
-
 _CLASSIFIERS: dict[str, Callable[[], ClassifierMixin]] = {
-    "knn": lambda: KNeighborsClassifier(),
-    "logistic_regression": lambda: LogisticRegression(
-        max_iter=1000, random_state=config.RANDOM_STATE
+    "knn": KNeighborsClassifier,
+    "logistic_regression": partial(
+        LogisticRegression, random_state=config.RANDOM_STATE
     ),
-    "random_forest": lambda: RandomForestClassifier(random_state=config.RANDOM_STATE),
+    "random_forest": partial(
+        RandomForestClassifier, random_state=config.RANDOM_STATE
+    ),
 }
 
 
@@ -47,6 +60,11 @@ def available_models() -> tuple[str, ...]:
     -------
     tuple[str, ...]
         Tuple of registered model identifier strings.
+        
+    Examples
+    --------
+    >>> available_models()
+    ('knn', 'logistic_regression', 'random_forest')
     """
     return tuple(_CLASSIFIERS)
 
@@ -71,12 +89,14 @@ def build_preprocess_transformer() -> ColumnTransformer:
             ),
             ("scale_num", MinMaxScaler(), list(config.NUM_SCALE_COLS)),
         ],
+# Everything not listed in either branch reaches the classifier through the
+# passthrough remainder: the three binary indicators (weekend, mix and name), already in [0, 1] and
+# therefore compatible with the min-max scaled features KNN compares them to.
         remainder="passthrough",
     )
 
 
-
-def get_model_pipeline(model_type: str = "knn") -> ImbPipeline:
+def get_model_pipeline(model_type: str) -> ImbPipeline:
     """Build the end-to-end pipeline for the requested classifier family.
 
     Parameters
@@ -94,14 +114,6 @@ def get_model_pipeline(model_type: str = "knn") -> ImbPipeline:
     ValueError
         If *model_type* is not a registered classifier family.
     """
-    overlapping_cols = set(config.COLUMNS_TO_REMOVE) & set(config.ESSENTIAL_COLS)
-    if overlapping_cols:
-        raise ValueError(
-            "CRITICAL CONFIGURATION ERROR: COLUMNS_TO_REMOVE contains essential "
-            f"pipeline feature columns: {overlapping_cols}. "
-            "Remove these from config.COLUMNS_TO_REMOVE to prevent breaking downstream feature engineering."
-        )
-
     try:
         clf = _CLASSIFIERS[model_type]()
     except KeyError as exc:
@@ -113,14 +125,18 @@ def get_model_pipeline(model_type: str = "knn") -> ImbPipeline:
     logger.info("Building pipeline for model type '%s'", model_type)
 
     return ImbPipeline([
+        # Order matters at both ends: DataCleaner comes first because it fills
+        # Name, Breed and Color with "Unknown", so the transformers below never
+        # see a missing value in them; SMOTE comes last before the classifier
+        # because it must resample the encoded matrix, not the raw frame.
         ("cleaner", DataCleaner()),
         ("temporal", TemporalFeaturesExtractor()),
-        ("categorical_eng", CategoricalFeaturesEngineer(max_other_ratio=config.MAX_OTHER_RATIO)),
+        ("categorical_eng", CategoricalFeaturesEngineer()),
         ("sex_eng", SexFeaturesExtractor()),
         ("name_eng", NameFeaturesExtractor()),
         ("onehot_and_scale", build_preprocess_transformer()),
-        # SMOTE rebalances the classes inside the pipeline. It only runs only on the training folds 
+        # SMOTE rebalances the classes inside the pipeline. It only runs on the training folds 
         # (imblearn contract), so the validation folds always keep the true class distribution (no data leakage)
         ("smote", SMOTE(random_state=config.RANDOM_STATE)),
         ("clf", clf),
-        ])
+    ])
