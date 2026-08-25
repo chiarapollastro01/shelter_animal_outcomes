@@ -429,7 +429,7 @@ class TestPlotting:
         """
         X_dogs = split_by_species(raw_X)["Dog"]
 
-        fig, ax = plot_top_categories(X_dogs, config.BREED_COL, "Dog", top_n=5)
+        _, ax = plot_top_categories(X_dogs, config.BREED_COL, "Dog", top_n=5)
 
         assert any("Unique Categories" in t.get_text() for t in ax.texts)
 
@@ -443,7 +443,7 @@ class TestPlotting:
         """
         X_dogs = split_by_species(raw_X)["Dog"]
 
-        fig, ax = plot_top_categories(X_dogs, config.BREED_COL, "Dog", top_n=2)
+        _, ax = plot_top_categories(X_dogs, config.BREED_COL, "Dog", top_n=2)
 
         assert len(ax.patches) == 2
 
@@ -456,7 +456,7 @@ class TestPlotting:
         """
         X_dogs = split_by_species(raw_X)["Dog"]
 
-        fig, ax = plot_top_categories(X_dogs, config.BREED_COL, "Dog", top_n=30)
+        _, ax = plot_top_categories(X_dogs, config.BREED_COL, "Dog", top_n=30)
 
         assert len(ax.patches) == X_dogs[config.BREED_COL].nunique()
         assert len(ax.patches) < 30
