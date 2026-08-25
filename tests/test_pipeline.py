@@ -112,6 +112,19 @@ class TestBuildPreprocessTransformer:
         assert routed["onehot"] == list(config.CAT_ENCODE_COLS)
         assert routed["scale_num"] == list(config.NUM_SCALE_COLS)
 
+    def test_the_undeclared_columns_pass_through(self):
+        """Verify that the columns in neither branch reach the classifier as they are.
+
+        GIVEN: the preprocessing transformer
+        WHEN: its remainder policy is inspected
+        THEN: it passes them through rather than dropping them, which is how
+              the three binary indicators survive: already in [0, 1], they need
+              no scaling to sit beside the min-max scaled features
+        """
+        transformer = build_preprocess_transformer()
+
+        assert transformer.remainder == "passthrough"
+
 class TestPipelineEndToEnd:
     @pytest.mark.parametrize("model_type", available_models())
     def test_pipeline_end_to_end_fit_and_predict(self, raw_mock_shelter_data, model_type: str):
