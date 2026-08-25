@@ -148,6 +148,17 @@ def load_params(path: Path = CONFIG_FILE_PATH) -> dict[str, Any]:
     ------
     FileNotFoundError
         If the file does not exist.
+    
+    ValueError
+        If the YAML file is empty or just commented.
     """
     with open(path, encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
+        params = yaml.safe_load(handle)
+
+    if params is None:
+        raise ValueError(
+            f"{path} holds no YAML document: an empty parameter file would "
+            "only fail later, on the first key the pipeline looks up."
+        )
+
+    return params

@@ -13,6 +13,12 @@ from src import config
 # Constants are addressed by name rather than by value: getattr resolves at
 # call time, so a renamed constant fails the single test that reads it instead
 # of aborting the collection of the whole module.
+
+# The two tuples below split every column constant of config into the ones the
+# raw file carries and the ones the pipeline derives. They are written by hand,
+# so test_every_column_constant_is_classified checks that neither has fallen
+# behind: it relies on the _COL suffix, and a column named without it would
+# escape both the check and the tests that read them.
 RAW_SCHEMA_NAMES = (
     "ID_COL",
     "NAME_COL",
@@ -92,6 +98,18 @@ def params_file(tmp_path: Path) -> Path:
 class TestRawSchema:
     """Testing constants naming the columns of the raw Kaggle file."""
 
+    def test_every_column_constant_is_classified(self):
+        """Verify that no column constant escapes both schema tuples.
+
+        GIVEN: every constant in config whose name ends in _COL
+        WHEN: compared with the raw and engineered names this suite declares
+        THEN: the two sets coincide, so a column added to config without being
+              classified here fails instead of going untested
+        """
+        declared = {name for name in dir(config) if name.endswith("_COL")}
+
+        assert declared == set(RAW_SCHEMA_NAMES) | set(ENGINEERED_SCHEMA_NAMES)
+        
     @pytest.mark.parametrize("constant_name", RAW_SCHEMA_NAMES)
     def test_raw_column_is_a_nonempty_string(self, constant_name: str):
         """Every raw column constant is a usable pandas column key.
@@ -339,30 +357,19 @@ class TestLoadParams:
         assert params["scoring"] == ["f1_macro", "accuracy"]
         assert params["search_spaces"]["knn"]["clf__n_neighbors"] == [3, 5]
 
-    def test_empty_file_yields_none(self, tmp_path: Path):
-        """An empty file produces None rather than an empty mapping.
+    def test_a_file_with_no_document_raises(self, tmp_path: Path):
+        """Verify that an empty or comment-only file is refused.
 
-        GIVEN: a YAML file with no content at all
+        GIVEN: a YAML file holding nothing but comments
         WHEN: load_params is called on its path
-        THEN: None comes back, which is what safe_load returns and what a
-              caller subscripting the result has to be ready for
+        THEN: a ValueError is raised, safe_load having returned None where the
+              signature promises a mapping
         """
         path = tmp_path / "empty.yaml"
-        path.write_text("", encoding="utf-8")
-
-        assert config.load_params(path) is None
-
-    def test_comment_only_file_yields_none(self, tmp_path: Path):
-        """A file holding only comments produces None as well.
-
-        GIVEN: a YAML file whose every line is a comment
-        WHEN: load_params is called on its path
-        THEN: None comes back, since comments carry no document
-        """
-        path = tmp_path / "comments.yaml"
         path.write_text("# nothing declared here\n", encoding="utf-8")
 
-        assert config.load_params(path) is None
+        with pytest.raises(ValueError, match="no YAML document"):
+            config.load_params(path)
 
     def test_missing_file_raises(self, tmp_path: Path):
         """Pointing at a file that does not exist fails immediately.
