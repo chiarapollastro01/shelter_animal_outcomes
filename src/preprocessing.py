@@ -272,6 +272,8 @@ class DataCleaner(BaseEstimator, TransformerMixin):
         X_clean = X.copy()
         X_clean = X_clean.drop(columns=list(self.columns_to_remove), errors="ignore")
 
+        # Runs before the mode imputation below, so a column listed in fill_targets never reaches it: 
+        # config keeps sex out of that tuple (test_the_sex_column_is_not_filled_with_a_literal).
         fill_values = {col: "Unknown" for col in self.fill_targets if col in X_clean.columns}
         X_clean = X_clean.fillna(value=fill_values)
 

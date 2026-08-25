@@ -234,6 +234,16 @@ class TestFeatureGroups:
         """
         assert set(config.CATEGORICAL_COLS) <= set(config.CAT_ENCODE_COLS)
 
+    def test_the_sex_column_is_not_filled_with_a_literal(self):
+        """Verify that the sex column is imputed with its mode, not with "Unknown".
+
+        GIVEN: FILL_TARGETS, whose columns DataCleaner fills before imputing
+        WHEN: the sex column is looked for among them
+        THEN: it is absent, since filling it first would leave the learned
+              mode unused and the imputation silently undone
+        """
+        assert config.SEX_COL not in config.FILL_TARGETS
+
     def test_scaled_columns_are_all_engineered(self):
         """Everything scaled is a column the pipeline itself creates.
 
@@ -245,7 +255,6 @@ class TestFeatureGroups:
         engineered = {getattr(config, name) for name in ENGINEERED_SCHEMA_NAMES}
 
         assert set(config.NUM_SCALE_COLS) <= engineered
-
 
 # =====================================================================
 #                       EXECUTION SETTINGS
