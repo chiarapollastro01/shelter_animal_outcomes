@@ -1,14 +1,12 @@
 """
 Preprocessing module for the Shelter Animal Outcomes Dataset.
-This module provides the data cleaning steps that prepare raw shelter data for
-machine learning: the row-level filtering that has to happen before the
-pipeline, and the scikit-learn compatible transformer that runs inside it.
+This module provides the data cleaning steps that prepare raw shelter data for machine learning.
 
 Exported Classes
 ----------------
 DataCleaner
-    A scikit-learn compatible transformer that orchestrates column dropping,
-    imputations and log-transformation of age in days.
+    A scikit-learn compatible transformer that orchestrates column dropping, 
+    imputations and log-transformation of the age feature.
 
 Exported Functions
 ------------------
@@ -17,17 +15,17 @@ extract_age_in_days(age_series: pd.Series) -> pd.Series
     (e.g., '2 years', '3 weeks') into equivalent numeric float days.
 
 drop_rows_missing_critical(X, y, critical_cols) -> tuple[pd.DataFrame, pd.Series]
-    Function that removes the rows whose critical columns are missing or
-    unusable, keeping features and target aligned. Runs outside the
-    scikit-learn pipeline, since a transformer cannot drop rows without
-    desynchronising X from y.
+    Function that removes the rows whose critical columns are missing or unusable,
+    keeping features and target aligned. Runs outside the scikit-learn 
+    pipeline, since a transformer (which only works on features, not target) 
+    cannot drop rows without desynchronising X from y.
 
 Note on the module boundary
 ---------------------------
 Creating log_age_in_days is, strictly speaking, feature engineering: it
 derives a new column rather than repairing an existing one. It lives here
 because the age column is treated as a whole: the raw text is parsed into
-days, the gaps are filled with the median learned during ``fit``, and the
+days, the gaps are filled with the median learned during the fit, and the
 logarithm is applied to that same scale. 
 """
 from __future__ import annotations
@@ -111,7 +109,7 @@ def drop_rows_missing_required(
     X : pd.DataFrame
         Feature matrix.
     y : pd.Series
-        Target values, aligned with `X`.
+        Target values, aligned with 'X'.
     row_required_cols : tuple[str, ...], default=config.ROW_REQUIRED_COLS
         Columns without which a row cannot be used at all.
 
@@ -211,7 +209,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
     sex_mode_: str | None = field(default=None, init=False, repr=False)
     age_median_: float | None = field(default=None, init=False, repr=False)
 
-    def fit(self, X: pd.DataFrame, y=None) -> "DataCleaner":
+    def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> "DataCleaner":
         """Learn imputation statistics (mode for sex, median age in days).
 
         Parameters
@@ -219,7 +217,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
         X : pd.DataFrame
             Training DataFrame.
 
-        y : None, optional
+        y : pd.Series | None, optional
             Ignored. Included for scikit-learn compatibility.
 
         Returns

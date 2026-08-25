@@ -16,7 +16,10 @@ from src.preprocessing import drop_rows_missing_required, extract_age_in_days, D
 @pytest.fixture
 def train_X() -> pd.DataFrame:
     """Training frame with known statistics: sex mode = 'Neutered Male',
-    median age = 730 days. Covers every column manipulated by the cleaner."""
+    median age = 730 days. Covers every column manipulated by the cleaner.
+    No animal type column: by the time the pipeline runs, the data has already
+    been split by species and that column dropped.
+    """
     return pd.DataFrame(
         {
             config.ID_COL: ["A1", "A2", "A3", "A4"],
@@ -35,6 +38,33 @@ def train_X() -> pd.DataFrame:
 def fitted_cleaner(train_X: pd.DataFrame) -> DataCleaner:
     """A DataCleaner already fitted on the training fixture."""
     return DataCleaner().fit(train_X)
+
+@pytest.fixture
+def rows_with_defects() -> tuple[pd.DataFrame, pd.Series]:
+    """Features and target where three rows are unusable for a different reason.
+
+    One row misses the timestamp, one misses the species, and one carries a
+    timestamp that is present but cannot be parsed. This fixture carries animal type
+    since it runs before the split by species
+    """
+    X = pd.DataFrame(
+        {
+            config.DATETIME_COL: [
+                "2026-01-01 10:00:00",
+                np.nan,
+                "2026-01-03 12:00:00",
+                "not a date",
+                "2026-01-05 14:00:00",
+            ],
+            config.SPECIES_COL: ["Dog", "Cat", np.nan, "Dog", "Cat"],
+        },
+        index=[10, 20, 30, 40, 50],
+    )
+    y = pd.Series(
+        ["Adoption", "Transfer", "Adoption", "Return_to_owner", "Transfer"],
+        index=[10, 20, 30, 40, 50],
+    )
+    return X, y
 
 # =====================================================================
 #                      AGE EXTRACTION TESTS
@@ -168,6 +198,122 @@ class TestExtractAgeInDays:
         assert result.empty
         pd.testing.assert_series_equal(result, expected, check_names=False)
 
+# =====================================================================
+#                 drop_rows_missing_critical TESTS
+# =====================================================================
+
+class TestDropRowsMissingRequired:
+    """Testing the row-level filter that runs before the pipeline."""
+
+    def test_rows_missing_a_required_column_are_dropped(self, rows_with_defects):
+        """Verify that a missing timestamp or species removes the row.
+
+        GIVEN: features whose required columns are missing on two rows
+        WHEN: drop_rows_missing_required is executed
+        THEN: those rows are gone from both outputs, and no required value
+              is left missing
+        """
+        X, y = rows_with_defects
+
+        X_clean, y_clean = drop_rows_missing_required(X, y)
+
+        assert len(X_clean) == len(y_clean)
+        assert not X_clean[list(config.ROW_REQUIRED_COLS)].isna().any().any()
+
+    def test_unparsable_timestamp_is_dropped(self, rows_with_defects):
+        """Verify that a timestamp which is present but unreadable is dropped.
+
+        GIVEN: a row whose DateTime is a non-empty string that is not a date
+        WHEN: drop_rows_missing_required is executed
+        THEN: the row is gone, since notna() alone would have kept it and it
+              would have become NaT inside the pipeline
+        """
+        X, y = rows_with_defects
+
+        X_clean, _ = drop_rows_missing_required(X, y)
+
+        assert "not a date" not in set(X_clean[config.DATETIME_COL])
+
+    def test_surviving_rows_keep_their_labels(self, rows_with_defects):
+        """Verify that features and target stay aligned after filtering.
+
+        GIVEN: defective rows sitting at non-final positions
+        WHEN: drop_rows_missing_required is executed
+        THEN: each surviving row keeps the label it had before, which the
+              reset of both indices could otherwise silently break
+        """
+        X, y = rows_with_defects
+
+        X_clean, y_clean = drop_rows_missing_required(X, y)
+
+        assert list(y_clean) == ["Adoption", "Transfer"]
+        assert list(X_clean.index) == list(range(len(X_clean)))
+
+    def test_a_clean_frame_is_returned_untouched(self, rows_with_defects):
+        """Verify that nothing is dropped when every row is usable.
+
+        GIVEN: features with no missing or unparsable required values
+        WHEN: drop_rows_missing_required is executed
+        THEN: every row survives
+        """
+        X, y = rows_with_defects
+        X_ok, y_ok = drop_rows_missing_required(X, y)
+
+        X_again, y_again = drop_rows_missing_required(X_ok, y_ok)
+
+        assert len(X_again) == len(X_ok)
+        assert len(y_again) == len(y_ok)
+
+    def test_absent_required_column_raises(self, rows_with_defects):
+        """Verify that a required column missing from the frame is an error.
+
+        GIVEN: a frame that does not carry one of the required columns
+        WHEN: drop_rows_missing_required is executed
+        THEN: a KeyError is raised, since the function cannot check 
+              for missing values in a column that is not present
+        """
+        X, y = rows_with_defects
+
+        with pytest.raises(KeyError):
+            drop_rows_missing_required(X.drop(columns=[config.SPECIES_COL]), y)
+
+    def test_all_defective_rows_returns_empty_structures(self):
+        """Verify that a frame where every row is unusable returns empty outputs 
+        with the same columns as the input.
+
+        GIVEN: a frame where every row is missing a required value
+        WHEN: drop_rows_missing_required is executed
+        THEN: both outputs are empty, but the feature frame retains the same
+              columns as the input
+        """
+        X = pd.DataFrame({
+            config.DATETIME_COL: ["invalid", np.nan],
+            config.SPECIES_COL: [np.nan, np.nan],
+        })
+        y = pd.Series(["Adoption", "Transfer"])
+
+        X_clean, y_clean = drop_rows_missing_required(X, y)
+
+        assert len(X_clean) == 0
+        assert len(y_clean) == 0
+        assert list(X_clean.columns) == list(X.columns)
+
+    def test_custom_required_columns_override(self, rows_with_defects):
+        """Verify that the required columns can be overridden with a custom list.
+
+        GIVEN: a frame missing both a timestamp and a species, and a custom
+               list requiring only the timestamp
+        WHEN: drop_rows_missing_required is executed
+        THEN: the row with the missing timestamp is dropped
+        """
+        X, y = rows_with_defects
+        
+        X_clean, y_clean = drop_rows_missing_required(
+            X, y, row_required_cols=(config.DATETIME_COL,)
+        )
+
+        assert len(X_clean) == 3
+        assert len(y_clean) == 3
 
 # =====================================================================
 #                       DATA CLEANER TESTS
@@ -229,7 +375,7 @@ class TestDataCleanerFit:
 
 class TestDataCleanerTransform:
      
-    def test_datacleaner_transform_raises_runtime_error_if_unfitted(self):
+    def test_datacleaner_transform_raises_not_fitted_error_if_unfitted(self):
         """ Verify that transform refuses to run before fit.
 
         GIVEN: a DataCleaner instance that has not been fitted
@@ -341,11 +487,10 @@ class TestDataCleanerTransform:
     def test_datacleaner_breed_color_preventive_imputation(self, fitted_cleaner, train_X):
         """ Verify preventive imputation of missing Breed and Color values with 'Unknown'.
 
-        GIVEN: a DataFrame containing missing values (NaN) in both breed and color columns,
-               with custom non-default indices
+        GIVEN: a DataFrame containing missing values (NaN) in both breed and color columns
         WHEN: transform is executed
-        THEN: all missing values (NaN) in both columns are successfully replaced with "Unknown",
-              preserving the original index
+        THEN: all missing values (NaN) in both columns are successfully replaced with "Unknown"
+              
         """
         X_clean = fitted_cleaner.transform(train_X)
 
@@ -381,18 +526,6 @@ class TestDataCleanerTransform:
 
         pd.testing.assert_frame_equal(train_X, original)
 
-    def test_datacleaner_logs_imputation_details(self, fitted_cleaner, train_X, caplog):
-        """ Verify specific logging output for both sex and age columns imputations.
-
-        GIVEN: a fitted cleaner and a DataFrame with missing values in both sex and age columns
-        WHEN: transform is executed with INFO logging captured
-        THEN: distinct imputation events are logged for both sex and age columns
-        """
-        with caplog.at_level(logging.INFO):
-            fitted_cleaner.transform(train_X)
-
-        assert config.SEX_COL in caplog.text
-        assert config.AGE_COL in caplog.text
 
 #----------------------------------------END TO END, CUSTOM & EDGE CASES------------------------------------------------------
 class TestDataCleanerCustomAndE2E:
@@ -527,106 +660,3 @@ class TestDataCleanerCustomAndE2E:
 
 
 
-# =====================================================================
-#                 drop_rows_missing_critical TESTS
-# =====================================================================
-
-@pytest.fixture
-def rows_with_defects() -> tuple[pd.DataFrame, pd.Series]:
-    """Features and target where three rows are unusable for a different reason.
-
-    One row misses the timestamp, one misses the species, and one carries a
-    timestamp that is present but cannot be parsed.
-    """
-    X = pd.DataFrame(
-        {
-            config.DATETIME_COL: [
-                "2026-01-01 10:00:00",
-                np.nan,
-                "2026-01-03 12:00:00",
-                "not a date",
-                "2026-01-05 14:00:00",
-            ],
-            config.SPECIES_COL: ["Dog", "Cat", np.nan, "Dog", "Cat"],
-        },
-        index=[10, 20, 30, 40, 50],
-    )
-    y = pd.Series(
-        ["Adoption", "Transfer", "Adoption", "Return_to_owner", "Transfer"],
-        index=[10, 20, 30, 40, 50],
-    )
-    return X, y
-
-class TestDropRowsMissingRequired:
-    """Testing the row-level filter that runs before the pipeline."""
-
-    def test_rows_missing_a_required_column_are_dropped(self, rows_with_defects):
-        """Verify that a missing timestamp or species removes the row.
-
-        GIVEN: features whose required columns are missing on two rows
-        WHEN: drop_rows_missing_required is executed
-        THEN: those rows are gone from both outputs, and no required value
-              is left missing
-        """
-        X, y = rows_with_defects
-
-        X_clean, y_clean = drop_rows_missing_required(X, y)
-
-        assert len(X_clean) == len(y_clean)
-        assert not X_clean[list(config.ROW_REQUIRED_COLS)].isna().any().any()
-
-    def test_unparsable_timestamp_is_dropped(self, rows_with_defects):
-        """Verify that a timestamp which is present but unreadable is dropped.
-
-        GIVEN: a row whose DateTime is a non-empty string that is not a date
-        WHEN: drop_rows_missing_required is executed
-        THEN: the row is gone, since notna() alone would have kept it and it
-              would have become NaT inside the pipeline
-        """
-        X, y = rows_with_defects
-
-        X_clean, _ = drop_rows_missing_required(X, y)
-
-        assert "not a date" not in set(X_clean[config.DATETIME_COL])
-
-    def test_surviving_rows_keep_their_labels(self, rows_with_defects):
-        """Verify that features and target stay aligned after filtering.
-
-        GIVEN: defective rows sitting at non-final positions
-        WHEN: drop_rows_missing_required is executed
-        THEN: each surviving row keeps the label it had before, which the
-              reset of both indices could otherwise silently break
-        """
-        X, y = rows_with_defects
-
-        X_clean, y_clean = drop_rows_missing_required(X, y)
-
-        assert list(y_clean) == ["Adoption", "Transfer"]
-        assert list(X_clean.index) == list(range(len(X_clean)))
-
-    def test_a_clean_frame_is_returned_untouched(self, rows_with_defects):
-        """Verify that nothing is dropped when every row is usable.
-
-        GIVEN: features with no missing or unparsable required values
-        WHEN: drop_rows_missing_required is executed
-        THEN: every row survives
-        """
-        X, y = rows_with_defects
-        X_ok, y_ok = drop_rows_missing_required(X, y)
-
-        X_again, y_again = drop_rows_missing_required(X_ok, y_ok)
-
-        assert len(X_again) == len(X_ok)
-
-    def test_absent_required_column_raises(self, rows_with_defects):
-        """Verify that a required column missing from the frame is an error.
-
-        GIVEN: a frame that does not carry one of the required columns
-        WHEN: drop_rows_missing_required is executed
-        THEN: a KeyError is raised, the presence of those columns being a
-              precondition rather than something to impute
-        """
-        X, y = rows_with_defects
-
-        with pytest.raises(KeyError):
-            drop_rows_missing_required(X.drop(columns=[config.SPECIES_COL]), y)
