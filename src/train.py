@@ -1,80 +1,130 @@
-"""Training script for the Shelter Animal Outcomes classifiers.
+"""Training module for the Shelter Animal Outcomes classifiers.
 
-Runs one model tournament per species (dog / cat): grid search over the
-registered classifier families with stratified cross-validation, unbiased
-final evaluation of each winner on a held-out split that never entered model
-selection, then persistence of the fitted pipeline plus a metadata sidecar.
+Runs the model tournament for one species: a grid search over the registered
+classifier families with stratified cross-validation, an unbiased evaluation
+of the winner on a hold-out split that never entered model selection, and
+the persistence of the fitted pipeline next to a metadata sidecar.
+
+Exported Functions
+------------------
+merge_search_grids(search_spaces) -> dict[str, dict[str, list]]
+    Function that merges the shared grid into the grid of each classifier
+    family, and refuses a family the pipeline cannot build.
+
+load_training_data(features_path, target_path) -> tuple[pd.DataFrame, pd.Series]
+    Function that reads the two files prepare_data wrote and fails fast if
+    they have drifted out of alignment.
+
+run_tournament(X, y, cv, search_grids, run_params) -> tuple[str, GridSearchCV]
+    Function that grid-searches every family and returns the winning one.
+
+train_one_species(X, y, models_dir, species, search_grids, run_params) -> None
+    Function that runs the tournament for one species and writes the winner
+    to disk.
+
+main(features_path, target_path, models_dir, config_path, species) -> None
+    Function that reads the split files and runs the tournament for one
+    species, writing the winner to disk.
+
+parse_args(args_list) -> argparse.Namespace
+    Function that parses the command-line arguments, kept apart from main so
+    that it can be tested without touching sys.argv.
+
+Note on the two scores
+----------------------
+The cross-validated score selects the winner, and a model selected as the best
+of many on that score alone is optimistically biased. The hold-out split exists
+to give an honest number: it takes no part in the search, and it is scored on
+the same metric so that the two are directly comparable.
+
+Note on the seed
+----------------
+Every other run parameter is read from config.yaml, the seed is not. It is
+fixed once for the whole project rather than chosen per run, which is what
+makes two runs of the same configuration comparable at all.
 
 CLI Usage
 ---------
-# Using default paths:
-python -m src.train
+# One species per invocation, using the default paths:
+python -m src.train --species Dog
+python -m src.train --species Cat
 
 # Or specifying custom paths:
-python -m src.train data/split_data/train_features.csv data/split_data/train_target.csv --models-dir models
-"""
+python -m src.train data/split_data/train_features.csv data/split_data/train_target.csv --models-dir models --species Dog
 
+# Or running a different search space:
+python -m src.train --config experiments/wide_grid.yaml --species Dog
+"""
 from __future__ import annotations
 
 import argparse
 import json
-import logging
-from pathlib import Path
-
 import joblib
 import pandas as pd
-from sklearn.metrics import classification_report, f1_score
-from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
+import logging
 
-from src.pipeline import get_model_pipeline
+from typing import Any
+from collections.abc import Mapping
+from sklearn.base import clone
+from sklearn.metrics import classification_report, get_scorer
+from pathlib import Path
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
+from src import config
+from src.preprocessing import drop_rows_missing_required
+from src.pipeline import available_models, get_model_pipeline
 
 logger = logging.getLogger(__name__)
 
-RANDOM_STATE = 42
-N_SPLITS = 5
-HOLDOUT_FRACTION = 0.2
-CRITICAL_COLS = ("DateTime", "AnimalType")
-SPECIES = ("Dog", "Cat")
+# Key of the search_spaces mapping holding the parameters shared by every
+# classifier family, as opposed to the per-family entries.
+COMMON_GRID_KEY = "common"
 
-SCORING = {
-    "f1_macro": "f1_macro",
-    "balanced_accuracy": "balanced_accuracy",
-    "accuracy": "accuracy",
-}
+def merge_search_grids(
+    search_spaces: Mapping[str, Mapping[str, list[Any]]],
+) -> dict[str, dict[str, list[Any]]]:
+    """Merge the shared grid into the grid of each classifier family.
 
+    The entry named by ``COMMON_GRID_KEY`` holds the parameters that apply to
+    every family (categorical-collapse ratio, SMOTE neighbours); every other
+    entry must name a registered classifier family. A family that repeats a
+    shared key overrides it.
 
-def build_search_spaces() -> dict[str, dict[str, list]]:
-    """Build hyperparameter grids for each classifier family.
-
-    The parameters shared by every family (categorical-collapse ratio, SMOTE
-    neighbours) sono definiti una sola volta e uniti a ciascuna griglia.
+    Parameters
+    ----------
+    search_spaces : Mapping[str, Mapping[str, list]]
+        Search grids as read from the configuration file.
 
     Returns
     -------
     dict[str, dict[str, list]]
-        A dictionary mapping each classifier family name to its respective
-        hyperparameter grid dictionary.
+        One complete grid per classifier family, ready for GridSearchCV.
+
+    Raises
+    ------
+    KeyError
+        If the shared entry is missing.
+    ValueError
+        If a key does not name a registered classifier family.
+
+    Examples
+    --------
+    >>> spaces = {"common": {"smote__k_neighbors": [3]}, "knn": {"clf__n_neighbors": [5]}}
+    >>> merge_search_grids(spaces)
+    {'knn': {'smote__k_neighbors': [3], 'clf__n_neighbors': [5]}}
     """
-    common = {
-        "categorical_eng__max_other_ratio": [0.10, 0.15, 0.20],
-        "smote__k_neighbors": [3, 5],
+    common = dict(search_spaces[COMMON_GRID_KEY])
+    grids = {
+        name: grid for name, grid in search_spaces.items() if name != COMMON_GRID_KEY
     }
-    return {
-        "knn": {
-            **common,
-            "clf__n_neighbors": [3, 5, 11],
-            "clf__weights": ["uniform", "distance"],
-        },
-        "logistic_regression": {
-            **common,
-            "clf__C": [0.1, 1.0, 10.0],
-        },
-        "random_forest": {
-            **common,
-            "clf__n_estimators": [100, 200],
-            "clf__max_depth": [None, 15, 30],
-        },
-    }
+
+    unknown = set(grids) - set(available_models())
+    if unknown:
+        raise ValueError(
+            f"Unknown classifier families in the search spaces: {sorted(unknown)}. "
+            f"Available: {available_models()}"
+        )
+
+    return {name: {**common, **dict(grid)} for name, grid in grids.items()}
 
 
 def load_training_data(
@@ -102,7 +152,7 @@ def load_training_data(
         If the number of rows in features and target differs.
     """
     X = pd.read_csv(features_path)
-    y = pd.read_csv(target_path).squeeze("columns")
+    y = pd.read_csv(target_path)[config.TARGET_COL]
 
     if len(X) != len(y):
         raise ValueError(
@@ -113,48 +163,17 @@ def load_training_data(
     return X, y
 
 
-def drop_rows_missing_critical(
+def run_tournament(
     X: pd.DataFrame,
     y: pd.Series,
-    critical_cols: tuple[str, ...] = CRITICAL_COLS,
-) -> tuple[pd.DataFrame, pd.Series]:
-    """Remove rows whose critical columns contain missing values.
-
-    A single vectorized boolean mask applied to both X and y keeps them
-    aligned without requiring any temporary merge of the target into the features.
-
-    Parameters
-    ----------
-    X : pd.DataFrame
-        The feature dataset.
-    y : pd.Series
-        The target series.
-    critical_cols : tuple[str, ...], default=CRITICAL_COLS
-        Tuple of column names considered critical for data integrity.
-
-    Returns
-    -------
-    tuple[pd.DataFrame, pd.Series]:
-        The cleaned and index-reset features DataFrame and target Series.
-    """
-    mask = X[list(critical_cols)].notna().all(axis=1)
-    n_dropped = int((~mask).sum())
-    if n_dropped:
-        logger.info(
-            "Dropped %d rows with missing critical columns %s",
-            n_dropped, critical_cols,
-        )
-    # reset_index prevents aligning problems with SMOTE/Scikit
-    return X.loc[mask].reset_index(drop=True), y.loc[mask].reset_index(drop=True)
-
-
-def run_tournament(
-    X: pd.DataFrame, y: pd.Series, cv: StratifiedKFold
+    cv: StratifiedKFold,
+    search_grids: Mapping[str, Mapping[str, list[Any]]],
+    run_params: Mapping[str, Any],
 ) -> tuple[str, GridSearchCV]:
     """Execute a grid-search tournament across all classifier families.
 
-    The winner model is selected based on the highest mean cross-validated 
-    F1-macro score.
+    The winner is the family with the highest mean cross-validated score on
+    the metric named by ``run_params["refit"]``.
 
     Parameters
     ----------
@@ -164,47 +183,72 @@ def run_tournament(
         The training target values.
     cv : StratifiedKFold
         Cross-validation splitting strategy.
+    search_grids : Mapping[str, Mapping[str, list]]
+        One complete grid per classifier family, as returned by
+        `merge_search_grids`.
+    run_params : Mapping[str, Any]
+        Run parameters read from the YAML file: holdout_size, cv_n_splits,
+        scoring and refit.
 
     Returns
     -------
     tuple[str, GridSearchCV]
-        A tuple containing the name of the winning model family and the 
+        A tuple containing the name of the winning model family and the
         fitted GridSearchCV object.
+    
+    Raises
+    ------
+    ValueError
+        If the search_grids mapping is empty, indicating that no classifier families were provided for the tournament.
     """
-    best_name, best_search = "", None
+    if not search_grids:
+        raise ValueError("No classifier family to search: the grids are empty.")
+    
+    best_name = ""
+    best_search: GridSearchCV | None = None
+    scoring = run_params["scoring"]
+    refit = run_params["refit"]
 
-    for model_name, grid in build_search_spaces().items():
+    for model_name, grid in search_grids.items():
         logger.info("Running GridSearchCV for %s...", model_name)
 
         search = GridSearchCV(
             estimator=get_model_pipeline(model_name),
-            param_grid=grid,
-            scoring=SCORING,
-            refit="f1_macro",
+            param_grid=dict(grid),
+            scoring=scoring,
+            refit=refit,
             cv=cv,
-            n_jobs=-1,
+            n_jobs=-1, # the outer loop: fits are independent, so they run in parallel
             verbose=1,
         )
         search.fit(X, y)
 
         logger.info(
-            "Best CV F1-macro for %s: %.4f (params: %s)",
-            model_name, search.best_score_, search.best_params_,
+            "Best CV %s for %s: %.4f (params: %s)",
+            refit, model_name, search.best_score_, search.best_params_,
         )
 
+        # Comparable across families because every GridSearchCV refits on
+        # the same metric: best_score_ is the mean CV score of that metric, in this case f1_macro.
         if best_search is None or search.best_score_ > best_search.best_score_:
             best_name, best_search = model_name, search
 
+    assert best_search is not None
     return best_name, best_search
 
 
 def train_one_species(
-    X: pd.DataFrame, y: pd.Series, models_dir: Path, species: str
+    X: pd.DataFrame,
+    y: pd.Series,
+    models_dir: Path,
+    species: str,
+    search_grids: Mapping[str, Mapping[str, list[Any]]],
+    run_params: Mapping[str, Any],
 ) -> None:
     """Run a full model tournament for a specific species and persist the winner.
 
-    Performs a hold-out split (untouched by grid search to ensure unbiased 
-    evaluation), runs the tournament, logs performance reports, and saves 
+    Performs a hold-out split (untouched by grid search to ensure unbiased
+    evaluation), runs the tournament, logs performance reports, and saves
     the best estimator pipeline along with a JSON metadata sidecar.
 
     Parameters
@@ -217,11 +261,20 @@ def train_one_species(
         Directory where trained models and metadata will be saved.
     species : str
         The animal species being processed (e.g., "dog", "cat").
+    search_grids : Mapping[str, Mapping[str, list]]
+        One complete grid per classifier family.
+    run_params : Mapping[str, Any]
+        Run parameters read from the YAML file: holdout_size, cv_n_splits,
+        scoring and refit. The seed is not among them: it comes from config,
+        being fixed once for the whole project rather than per run.
 
     Returns
     -------
     None
     """
+    holdout_size = run_params["holdout_size"]
+    n_splits = run_params["cv_n_splits"]
+
     logger.info(
         "===== Tournament for %s (%d samples) =====", species.upper(), len(X)
     )
@@ -231,80 +284,116 @@ def train_one_species(
     # is optimistically biased).
     X_train, X_hold, y_train, y_hold = train_test_split(
         X, y,
-        test_size=HOLDOUT_FRACTION,
+        test_size=holdout_size,
         stratify=y,
-        random_state=RANDOM_STATE,
+        random_state=config.RANDOM_STATE,
     )
 
-    cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
-    best_name, best_search = run_tournament(X_train, y_train, cv)
+    cv = StratifiedKFold(
+        n_splits=n_splits, shuffle=True, random_state=config.RANDOM_STATE
+    )
+    best_name, best_search = run_tournament(X_train, y_train, cv, search_grids, run_params)
 
+    # Scored with the same metric used to pick the winner, so that the CV
+    # score and the hold-out score are directly comparable.
     y_pred = best_search.best_estimator_.predict(X_hold)
-    holdout_f1 = f1_score(y_hold, y_pred, average="macro")
-
+    holdout_score = get_scorer(run_params["refit"])(
+        best_search.best_estimator_, X_hold, y_hold
+    )
+    
     logger.info(
-        "[%s] winner: %s | CV F1-macro=%.4f | hold-out F1-macro=%.4f",
-        species.upper(), best_name, best_search.best_score_, holdout_f1,
+        "[%s] winner: %s | CV %s=%.4f | hold-out %s=%.4f",
+        species.upper(), best_name,
+        run_params["refit"], best_search.best_score_,
+        run_params["refit"], holdout_score,
     )
     logger.info(
         "[%s] hold-out classification report:\n%s",
         species.upper(), classification_report(y_hold, y_pred),
     )
 
-    stem = f"best_shelter_model_{species.lower()}"
-    model_path = models_dir / f"{stem}.pkl"
-    joblib.dump(best_search.best_estimator_, model_path)
+    # The model name lives in config because evaluate has to find this file
+    # again. The sidecar name does not: nothing outside this module reads it
+    model_path = models_dir / config.MODEL_FILE_TEMPLATE.format(species=species.lower())
+    metadata_path = model_path.with_suffix(".json")
+
+    final_model = clone(best_search.best_estimator_).fit(X, y)
+    joblib.dump(final_model, model_path)
 
     metadata = {
         "species": species,
         "model": best_name,
-        "cv_f1_macro": best_search.best_score_,
-        "holdout_f1_macro": holdout_f1,
+        "metric": run_params["refit"],
+        "cv_score": best_search.best_score_,
+        "holdout_score": holdout_score,
         "best_params": best_search.best_params_,
         "n_samples": len(X),
+        "n_samples_scored": len(X_train),
+        "refit_on_full_species_data": True,
+        # The resolved run parameters are recorded here because config.yaml can
+        # change after training: without them the scores above would not say
+        # which metric, which split, or which grid produced them.
+        "run_params": dict(run_params),
     }
-    (models_dir / f"{stem}.json").write_text(
-        json.dumps(metadata, indent=2, default=str)
-    )
+    metadata_path.write_text(json.dumps(metadata, indent=2, default=str))
+
     logger.info("Saved %s (+ metadata sidecar)", model_path)
 
 
-def main(features_path: Path, target_path: Path, models_dir: Path) -> None:
-    """Execute the complete training pipeline.
+def main(
+    features_path: Path,
+    target_path: Path,
+    models_dir: Path,
+    config_path: Path,
+    species: str,
+) -> None:
+    """Train and persist the winning model for one species.
 
-    Loads data, cleans critical missing rows, splits the dataset by species,
-    runs an independent model tournament for each species, and stores the artifacts.
+    Reads the run parameters and the two split files, drops the rows that miss
+    a required column, keeps the rows of the requested species and hands them
+    to the tournament, which writes the winner and its metadata to disk.
+
+    One species per invocation: the two tournaments are independent, 
+    so the Snakefile can declare one model file per species and rebuild 
+    only the one that is missing.
 
     Parameters
     ----------
-    features_path : Path | None, default=None
-        Path to extracted features CSV. If None, relies on CLI arguments.
-    target_path : Path | None, default=None
-        Path to extracted target CSV. If None, relies on CLI arguments.
-    models_dir : Path | None, default=None
-        Directory to persist trained models. If None, relies on CLI arguments.
+    features_path : Path
+        Path to extracted features CSV.
+    target_path : Path
+        Path to extracted target CSV.
+    models_dir : Path
+        Directory to persist trained models.
+    config_path : Path
+        Path to the YAML file holding the search spaces and run parameters.
+    species : str
+        The species to train on, one of config.SPECIES.
 
     Returns
     -------
     None
+
+    Raises
+    ------
+    ValueError
+        If no row of that species survived the filtering.
     """
+    run_params = config.load_params(config_path)
+    search_grids = merge_search_grids(run_params["search_spaces"])
+    logger.info("Loaded search grids for %s from %s", sorted(search_grids), config_path)
+
     X, y = load_training_data(features_path, target_path)
-    X, y = drop_rows_missing_critical(X, y)
+    X, y = drop_rows_missing_required(X, y)
 
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    for species in SPECIES:
-        mask = X["AnimalType"] == species
-        X_species = X.loc[mask].drop(columns=["AnimalType"]).reset_index(drop=True)
-        y_species = y.loc[mask].reset_index(drop=True)
-        train_one_species(
-            X_species,
-            y_species,
-            models_dir,
-            species,
-        )
-
-    logger.info("All tournaments finished successfully. Training phase complete.")
+    mask = X[config.SPECIES_COL] == species
+    if not mask.any():
+        raise ValueError(f"No {species} rows in the training set.")
+    X_species = X.loc[mask].drop(columns=[config.SPECIES_COL]).reset_index(drop=True)
+    y_species = y.loc[mask].reset_index(drop=True)
+    train_one_species(X_species, y_species, models_dir, species, search_grids, run_params)
 
 
 def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
@@ -318,7 +407,8 @@ def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
     Returns
     -------
     argparse.Namespace
-        Parsed arguments containing features_path, target_path, and models_dir.
+        Parsed arguments containing features_path, target_path, models_dir
+        and config_path.
     """
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -326,33 +416,53 @@ def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
         "features_path",
         type=Path,
         nargs="?",
-        default=Path("data/split_data/train_features.csv"),
+        default=config.SPLIT_DATA_DIR / config.TRAIN_FEATURES_FILE,
         help="Path to extracted features CSV",
     )
     parser.add_argument(
         "target_path",
         type=Path,
         nargs="?",
-        default=Path("data/split_data/train_target.csv"),
+        default=config.SPLIT_DATA_DIR / config.TRAIN_TARGET_FILE,
         help="Path to extracted target CSV",
     )
     parser.add_argument(
         "--models-dir",
         type=Path,
-        default=Path("models"),
+        default=config.MODELS_DIR,
         help="Directory to persist trained models and metadata",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        dest="config_path",
+        default=config.CONFIG_FILE_PATH,
+        help="YAML file holding the hyperparameter search spaces and run parameters",
+    )
+
+    parser.add_argument(
+        "--species",
+        required=True,
+        choices=config.SPECIES,
+        help="Species to train on: one tournament per invocation",
     )
     return parser.parse_args(args_list)
 
 
 # Testing note:
-# This following block is excluded from coverage. Running the actual entry point 
+# This following block is excluded from coverage. Running the actual entry point
 # would trigger a full GridSearchCV inside the test suite, which would be extremely slow.
-if __name__ == "__main__": 
+if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
     args = parse_args()
-    main(args.features_path, args.target_path, args.models_dir)
+    main(
+        args.features_path,
+        args.target_path,
+        args.models_dir,
+        args.config_path,
+        args.species,
+    )
