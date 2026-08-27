@@ -1,0 +1,5 @@
+# SHA-256 checksums of the raw files, to confirm a download matches the one this
+# analysis was run on. Verify with:
+#     sha256sum -c data/metadata/checksums.txt
+# from the root of the project.
+e40b355d0b712c164972e09510d2c10a783f79a75d50778cd29209e101311555  data/raw_data/train.csv
