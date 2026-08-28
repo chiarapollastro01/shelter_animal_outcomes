@@ -50,7 +50,8 @@ python -m src.train --species Dog
 python -m src.train --species Cat
 
 # Or specifying custom paths:
-python -m src.train data/split_data/train_features.csv data/split_data/train_target.csv --models-dir models --species Dog
+python -m src.train data/split_data/train_features.csv data/split_data/train_target.csv
+ --models-dir models --species Dog
 
 # Or running a different search space:
 python -m src.train --config experiments/wide_grid.yaml --species Dog
@@ -58,20 +59,21 @@ python -m src.train --config experiments/wide_grid.yaml --species Dog
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import json
+import logging
+from pathlib import Path
+from typing import Any
+
 import joblib
 import pandas as pd
-import logging
-
-from typing import Any
-from collections.abc import Mapping
 from sklearn.base import clone
 from sklearn.metrics import classification_report, get_scorer
-from pathlib import Path
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
+
 from src import config
-from src.preprocessing import drop_rows_missing_required
 from src.pipeline import available_models, get_model_pipeline
+from src.preprocessing import drop_rows_missing_required
 
 logger = logging.getLogger(__name__)
 
@@ -195,15 +197,16 @@ def run_tournament(
     tuple[str, GridSearchCV]
         A tuple containing the name of the winning model family and the
         fitted GridSearchCV object.
-    
+
     Raises
     ------
     ValueError
-        If the search_grids mapping is empty, indicating that no classifier families were provided for the tournament.
+        If the search_grids mapping is empty, indicating that no classifier
+        families were provided for the tournament.
     """
     if not search_grids:
         raise ValueError("No classifier family to search: the grids are empty.")
-    
+
     best_name = ""
     best_search: GridSearchCV | None = None
     scoring = run_params["scoring"]
@@ -236,7 +239,10 @@ def run_tournament(
     assert best_search is not None
     return best_name, best_search
 
-
+# train_one_species takes six arguments because the tournament needs the data,
+# the destination, the species and the two halves of the configuration; folding
+# them into an object would hide what each step actually reads
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def train_one_species(
     X: pd.DataFrame,
     y: pd.Series,
@@ -300,7 +306,7 @@ def train_one_species(
     holdout_score = get_scorer(run_params["refit"])(
         best_search.best_estimator_, X_hold, y_hold
     )
-    
+
     logger.info(
         "[%s] winner: %s | CV %s=%.4f | hold-out %s=%.4f",
         species.upper(), best_name,
@@ -353,8 +359,8 @@ def main(
     a required column, keeps the rows of the requested species and hands them
     to the tournament, which writes the winner and its metadata to disk.
 
-    One species per invocation: the two tournaments are independent, 
-    so the Snakefile can declare one model file per species and rebuild 
+    One species per invocation: the two tournaments are independent,
+    so the Snakefile can declare one model file per species and rebuild
     only the one that is missing.
 
     Parameters

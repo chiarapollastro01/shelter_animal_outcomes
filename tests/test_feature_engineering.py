@@ -1,29 +1,30 @@
+# pylint: disable=too-many-lines
 """
 Unit tests for the feature engineering module.
 """
 
+from functools import partial
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
-import logging
-from functools import partial
 from sklearn.exceptions import NotFittedError
+
 from src import config
 from src.feature_engineering import (
-    TemporalFeaturesExtractor,
     CategoricalFeaturesEngineer,
+    NameFeaturesExtractor,
     RareCategoriesGrouper,
+    SexFeaturesExtractor,
+    TemporalFeaturesExtractor,
     extract_primary_breed,
     extract_primary_color,
-    SexFeaturesExtractor,
-    NameFeaturesExtractor
 )
 
 
-TWO_PI= 2* np.pi # GLOBAL CONSTANT
-# =====================================================================
-#           SHARED CONTRACT TESTS (all five transformers)
-# =====================================================================
+TWO_PI= 2* np.pi
+
 
 TRANSFORMER_FACTORIES = [
     pytest.param(TemporalFeaturesExtractor, id="temporal"),
@@ -85,10 +86,10 @@ def test_transform_does_not_mutate_input(make_transformer, full_feature_frame):
     "make_transformer, custom_col, sample_value, expected_col",
     [
         pytest.param(
-            partial(TemporalFeaturesExtractor, datetime_col="my_date"), 
+            partial(TemporalFeaturesExtractor, datetime_col="my_date"),
             "my_date",
             "2026-07-06 12:00:00",
-            config.IS_WEEKEND_COL, 
+            config.IS_WEEKEND_COL,
              id="temporal_custom",
         ),
         pytest.param(
@@ -122,18 +123,19 @@ def test_extractors_support_custom_column_names(
     assert custom_col not in X_transformed.columns
     assert expected_col in X_transformed.columns
 
-
 # =====================================================================
 #                       TEMPORAL FEATURE TESTS (Stateless)
 # =====================================================================
 class TestTemporalFeaturesExtractor:
+    """Testing the cyclic and weekend features derived from the raw datetime column."""
 
     def test_temporal_extractor_success(self):
         """Verify that TemporalFeaturesExtractor drops raw datetime and generates cyclic columns.
 
         GIVEN: a DataFrame containing a raw datetime string column
         WHEN: fit_transform is executed
-        THEN: raw datetime column is dropped, expected cyclic columns and weekend indicator are added, 
+        THEN: raw datetime column is dropped, expected cyclic columns and weekend indicator are
+              added,
           and original index is preserved
         """
         X_train = pd.DataFrame(
@@ -161,7 +163,8 @@ class TestTemporalFeaturesExtractor:
 
         GIVEN: a DataFrame with dates representing Monday, Friday, Saturday, and Sunday
         WHEN: fit_transform is executed
-        THEN: weekend indicator is assigned 0.0 for weekdays and 1.0 for weekends, preserving custom index
+        THEN: weekend indicator is assigned 0.0 for weekdays and 1.0 for weekends, preserving custom
+              index
         """
         X_train = pd.DataFrame(
             {
@@ -187,81 +190,117 @@ class TestTemporalFeaturesExtractor:
     def test_temporal_extractor_cyclic_hours(self):
         """Verify the mathematical correctness of sine and cosine transformations for hours.
 
-        GIVEN: a DataFrame with precise timestamps representing Midnight (hour 0), 6 AM (hour 6), and Noon (hour 12)
+        GIVEN: a DataFrame with precise timestamps representing Midnight (hour 0), 6 AM (hour 6),
+               and Noon (hour 12)
                and a custom non-default index
         WHEN: the transform method of TemporalFeaturesExtractor is executed
-        THEN: Hour_sin and Hour_cos calculate accurate values at boundaries (0, pi/2, pi) respectively,
+        THEN: Hour_sin and Hour_cos calculate accurate values at boundaries (0, pi/2, pi)
+              respectively,
               preserving the original index and handling float precision tolerances
         """
         X_train = pd.DataFrame({
             config.DATETIME_COL: [
-                "2026-01-01 00:00:00",  
-                "2026-01-01 06:00:00",  
-                "2026-01-01 12:00:00", 
+                "2026-01-01 00:00:00",
+                "2026-01-01 06:00:00",
+                "2026-01-01 12:00:00",
                 ]
             },
             index=[11, 22, 33],
         )
-        expected_sin = pd.Series(np.sin(TWO_PI * np.array([0, 6, 12]) / 24), index=[11, 22, 33], name=config.HOUR_SIN_COL)
-        expected_cos = pd.Series(np.cos(TWO_PI* np.array([0, 6, 12]) / 24), index=[11, 22, 33], name=config.HOUR_COS_COL)
+        expected_sin = pd.Series(
+            np.sin(TWO_PI * np.array([0, 6, 12]) / 24), index=[11, 22, 33], name=config.HOUR_SIN_COL
+        )
+        expected_cos = pd.Series(
+            np.cos(TWO_PI* np.array([0, 6, 12]) / 24), index=[11, 22, 33], name=config.HOUR_COS_COL
+        )
 
         X_transformed = TemporalFeaturesExtractor().fit_transform(X_train)
 
-        pd.testing.assert_series_equal(X_transformed[config.HOUR_SIN_COL], expected_sin, check_exact=False, atol=1e-7)
-        pd.testing.assert_series_equal(X_transformed[config.HOUR_COS_COL], expected_cos, check_exact=False, atol=1e-7)
+        pd.testing.assert_series_equal(
+            X_transformed[config.HOUR_SIN_COL], expected_sin, check_exact=False, atol=1e-7
+        )
+        pd.testing.assert_series_equal(
+            X_transformed[config.HOUR_COS_COL], expected_cos, check_exact=False, atol=1e-7
+        )
 
 
     def test_temporal_extractor_cyclic_weekdays(self):
         """Verify the mathematical correctness of sine and cosine transformations for weekdays.
 
-        GIVEN: a DataFrame containing a Monday (weekday 0) and a Sunday (weekday 6) with custom non-default indices
+        GIVEN: a DataFrame containing a Monday (weekday 0) and a Sunday (weekday 6) with custom
+               non-default indices
         WHEN: the transform method of TemporalFeaturesExtractor is executed
-        THEN: Wday_sin and Wday_cos are computed accurately based on the weekday, preserving the index
+        THEN: Wday_sin and Wday_cos are computed accurately based on the weekday, preserving the
+              index
               and handling float precision tolerances
         """
-        X_train = pd.DataFrame({config.DATETIME_COL: ["2026-07-06", "2026-07-12"]}, index=[15, 25]) 
-        expected_sin = pd.Series(np.sin(TWO_PI * np.array([0, 6]) / 7), index=[15, 25], name=config.WDAY_SIN_COL)
-        expected_cos = pd.Series(np.cos(TWO_PI * np.array([0, 6]) / 7), index=[15, 25], name=config.WDAY_COS_COL)
+        X_train = pd.DataFrame({config.DATETIME_COL: ["2026-07-06", "2026-07-12"]}, index=[15, 25])
+        expected_sin = pd.Series(
+            np.sin(TWO_PI * np.array([0, 6]) / 7), index=[15, 25], name=config.WDAY_SIN_COL
+        )
+        expected_cos = pd.Series(
+            np.cos(TWO_PI * np.array([0, 6]) / 7), index=[15, 25], name=config.WDAY_COS_COL
+        )
 
         X_transformed = TemporalFeaturesExtractor().fit_transform(X_train)
 
-        pd.testing.assert_series_equal(X_transformed[config.WDAY_SIN_COL], expected_sin, check_exact=False, atol=1e-7)
-        pd.testing.assert_series_equal(X_transformed[config.WDAY_COS_COL], expected_cos, check_exact=False, atol=1e-7)
+        pd.testing.assert_series_equal(
+            X_transformed[config.WDAY_SIN_COL], expected_sin, check_exact=False, atol=1e-7
+        )
+        pd.testing.assert_series_equal(
+            X_transformed[config.WDAY_COS_COL], expected_cos, check_exact=False, atol=1e-7
+        )
 
 
     def test_temporal_extractor_cyclic_day_of_year(self):
-        """Verify the mathematical correctness of sine and cosine transformations for the day of the year.
+        """Verify the mathematical correctness of sine and cosine transformations for the day of the
+           year.
 
-        GIVEN: a DataFrame containing dates representing Day of Year 1 (Jan 1) and 100 (Apr 10) in a non-leap year (2026),
+        GIVEN: a DataFrame containing dates representing Day of Year 1 (Jan 1) and 100 (Apr 10) in a
+               non-leap year (2026),
            with custom non-default indices
         WHEN: the transform method of TemporalFeaturesExtractor is executed
-        THEN: DoY_sin and DoY_cos columns are computed accurately based on the day of the year, preserving the index
+        THEN: DoY_sin and DoY_cos columns are computed accurately based on the day of the year,
+              preserving the index
               and handling float precision tolerances
         """
         X_train = pd.DataFrame({config.DATETIME_COL: ["2026-01-01", "2026-04-10"]}, index=[11, 22])
-        expected_sin = pd.Series(np.sin(TWO_PI * np.array([1, 100]) / 365.25), index=[11, 22], name=config.DOY_SIN_COL)
-        expected_cos = pd.Series(np.cos(TWO_PI * np.array([1, 100]) / 365.25), index=[11, 22], name=config.DOY_COS_COL)
+        expected_sin = pd.Series(
+            np.sin(TWO_PI * np.array([1, 100]) / 365.25), index=[11, 22], name=config.DOY_SIN_COL
+        )
+        expected_cos = pd.Series(
+            np.cos(TWO_PI * np.array([1, 100]) / 365.25), index=[11, 22], name=config.DOY_COS_COL
+        )
 
         X_transformed = TemporalFeaturesExtractor().fit_transform(X_train)
 
-        pd.testing.assert_series_equal(X_transformed[config.DOY_SIN_COL], expected_sin, check_exact=False, atol=1e-7)
-        pd.testing.assert_series_equal(X_transformed[config.DOY_COS_COL], expected_cos, check_exact=False, atol=1e-7)
+        pd.testing.assert_series_equal(
+            X_transformed[config.DOY_SIN_COL], expected_sin, check_exact=False, atol=1e-7
+        )
+        pd.testing.assert_series_equal(
+            X_transformed[config.DOY_COS_COL], expected_cos, check_exact=False, atol=1e-7
+        )
 
 
     def test_temporal_extractor_already_datetime_type(self):
-        """Verify that the transformer produces identical values regardless of whether the input is raw string or datetime64.
+        """Verify that the transformer produces identical values regardless of whether the input is
+           raw string or datetime64.
 
-        GIVEN: two identical DataFrames, one with raw string dates and one pre-converted to datetime64[ns]
+        GIVEN: two identical DataFrames, one with raw string dates and one pre-converted to
+               datetime64[ns]
         WHEN: transform is executed on both
-        THEN: both executions succeed, producing perfectly identical DataFrames in both schema and values, 
+        THEN: both executions succeed, producing perfectly identical DataFrames in both schema and
+              values,
               preserving the index and dropping datetime column
         """
         X_strings = pd.DataFrame({config.DATETIME_COL: ["2026-07-06 12:00:00"]}, index=[99])
-        X_datetime = pd.DataFrame({config.DATETIME_COL: pd.to_datetime(["2026-07-06 12:00:00"])}, index=[99])
-    
+        X_datetime = pd.DataFrame(
+            {config.DATETIME_COL: pd.to_datetime(["2026-07-06 12:00:00"])}, index=[99]
+        )
+
         res_strings = TemporalFeaturesExtractor().fit_transform(X_strings)
         res_datetime = TemporalFeaturesExtractor().fit_transform(X_datetime)
-    
+
         pd.testing.assert_frame_equal(res_strings, res_datetime)
 
     def test_temporal_extractor_invalid_inputs(self):
@@ -269,7 +308,8 @@ class TestTemporalFeaturesExtractor:
 
         GIVEN: a DataFrame containing an invalid/unparseable date string
         WHEN: transform is executed on TemporalFeaturesExtractor
-        THEN: execution succeeds without raising exceptions, resulting in NaN values for cyclic features
+        THEN: execution succeeds without raising exceptions, resulting in NaN values for cyclic
+              features
         """
         X_train = pd.DataFrame({config.DATETIME_COL: ["invalid_date_string"]}, index=[1])
 
@@ -280,38 +320,52 @@ class TestTemporalFeaturesExtractor:
 
 
     def test_temporal_extractor_empty_dataframe_with_columns(self):
-        """Verify that an empty DataFrame with the target column is processed safely without crashing.
+        """Verify that an empty DataFrame with the target column is processed safely without
+           crashing.
 
         GIVEN: an empty DataFrame with only the datetime column in its schema
         WHEN: transform is executed on TemporalFeaturesExtractor
-        THEN: the returned DataFrame is empty, datetime column is dropped, and the expected empty schema is preserved
+        THEN: the returned DataFrame is empty, datetime column is dropped, and the expected empty
+              schema is preserved
         """
         X_train = pd.DataFrame(columns=(config.DATETIME_COL,))
 
-        expected_cols = {config.IS_WEEKEND_COL, config.HOUR_SIN_COL, config.HOUR_COS_COL, config.WDAY_SIN_COL, config.WDAY_COS_COL, config.DOY_SIN_COL, config.DOY_COS_COL}
+        expected_cols = {
+        config.IS_WEEKEND_COL,
+        config.HOUR_SIN_COL,
+        config.HOUR_COS_COL,
+        config.WDAY_SIN_COL,
+        config.WDAY_COS_COL,
+        config.DOY_SIN_COL,
+        config.DOY_COS_COL,
+    }
 
         X_transformed = TemporalFeaturesExtractor().fit_transform(X_train)
-    
+
         assert X_transformed.empty
         assert set(X_transformed.columns) == expected_cols
 
     def test_temporal_extractor_handles_null_values(self):
-        """Verify that missing or invalid date values do not crash the execution and propagate as NaN.
+        """Verify that missing or invalid date values do not crash the execution and propagate as
+           NaN.
 
         GIVEN: a DataFrame with valid datetime values and a None value, under custom indices
         WHEN: transform is executed on TemporalFeaturesExtractor
-        THEN: the valid date is calculated, and the missing value safely propagates as NaN in the cyclic columns
+        THEN: the valid date is calculated, and the missing value safely propagates as NaN in the
+              cyclic columns
         """
-        X_train = pd.DataFrame({config.DATETIME_COL: ["2026-07-12 12:00:00", None]}, index=[101, 102])
-    
+        X_train = pd.DataFrame(
+            {config.DATETIME_COL: ["2026-07-12 12:00:00", None]}, index=[101, 102]
+        )
+
         X_transformed = TemporalFeaturesExtractor().fit_transform(X_train)
-    
+
         assert not np.isnan(X_transformed[config.HOUR_SIN_COL].loc[101])
 
         assert np.isnan(X_transformed[config.HOUR_SIN_COL].loc[102])
         assert np.isnan(X_transformed[config.WDAY_COS_COL].loc[102])
         assert np.isnan(X_transformed[config.DOY_SIN_COL].loc[102])
-    
+
         assert X_transformed[config.IS_WEEKEND_COL].loc[101] == 1.0
         assert np.isnan(X_transformed[config.IS_WEEKEND_COL].loc[102])
 
@@ -333,7 +387,8 @@ class TestTemporalFeaturesExtractor:
 
         GIVEN: a DataFrame where all entries in DateTime are NaN
         WHEN: fit_transform is executed on TemporalFeaturesExtractor
-        THEN: all extracted cyclic features and weekend indicator is safely resolve to NaN, preserving the index
+        THEN: all extracted cyclic features and weekend indicator is safely resolve to NaN,
+              preserving the index
         """
         X_train = pd.DataFrame({config.DATETIME_COL: [np.nan, np.nan]}, index=[10, 20])
 
@@ -348,30 +403,31 @@ class TestTemporalFeaturesExtractor:
 # =====================================================================
 
 class TestSexFeaturesExtractor:
-  
+    """Testing the reproductive status and sex features derived from the raw sex column."""
 
     def test_sex_extractor_success(self):
-        """Verify that SexFeaturesExtractor successfully extracts the reproductive status column and drops the raw column.
+        """Verify that SexFeaturesExtractor successfully extracts the reproductive status column and
+           drops the raw column.
 
         GIVEN: a DataFrame with raw sex values containing neutered,
            spayed, intact, unknown, and NaN entries, with a custom index
         WHEN: transform is executed on SexFeaturesExtractor
-        THEN: the raw column is dropped and the reproductive status 
+        THEN: the raw column is dropped and the reproductive status
           is accurately mapped, preserving the original index
         """
         X_train = pd.DataFrame({
             config.SEX_COL: ["Neutered Male", "Spayed Female", "Intact Male", "Unknown", np.nan]
         }, index=[10, 20, 30, 40, 50])
-    
+
 
         expected = pd.Series(
             ["Neutered/Spayed", "Neutered/Spayed", "Intact", "Unknown", "Unknown"],
             index=[10, 20, 30, 40, 50],
             name=config.REPRODUCTIVE_STATUS_COL
         )
-    
+
         X_transformed = SexFeaturesExtractor().fit_transform(X_train)
-    
+
         assert config.SEX_COL not in X_transformed.columns
         pd.testing.assert_series_equal(X_transformed[config.REPRODUCTIVE_STATUS_COL], expected)
 
@@ -386,17 +442,22 @@ class TestSexFeaturesExtractor:
             {config.SEX_COL: ["spayed female", "NEUTERED MALE", "  intact male  "]}, index=[1, 2, 3]
         )
         expected_status = pd.Series(
-            ["Neutered/Spayed", "Neutered/Spayed", "Intact"], index=[1, 2, 3], name=config.REPRODUCTIVE_STATUS_COL
+            ["Neutered/Spayed", "Neutered/Spayed", "Intact"],
+            index=[1, 2, 3],
+            name=config.REPRODUCTIVE_STATUS_COL,
         )
 
         X_transformed = SexFeaturesExtractor().fit_transform(X_train)
 
-        pd.testing.assert_series_equal(X_transformed[config.REPRODUCTIVE_STATUS_COL], expected_status)
+        pd.testing.assert_series_equal(
+            X_transformed[config.REPRODUCTIVE_STATUS_COL], expected_status
+        )
 
     def test_sex_extractor_invalid_inputs(self):
         """Verify safe fallback to 'Unknown' when encountering invalid sex strings.
 
-        GIVEN: a DataFrame containing 'Unknown', and completely unrecognized text ('5 units', 'Random')
+        GIVEN: a DataFrame containing 'Unknown', and completely unrecognized text ('5 units',
+               'Random')
         WHEN: fit_transform is executed on SexFeaturesExtractor
         THEN: all unrecognized inputs safely resolve to 'Unknown' without breaking execution
         """
@@ -421,7 +482,8 @@ class TestSexFeaturesExtractor:
 
         GIVEN: an empty DataFrame with only the sex column in its schema
         WHEN: transform is executed on SexFeaturesExtractor
-        THEN: the returned DataFrame is empty, sex is dropped, and the reproductive status feature is created
+        THEN: the returned DataFrame is empty, sex is dropped, and the reproductive status feature
+              is created
         """
         X_train = pd.DataFrame(columns=(config.SEX_COL,))
 
@@ -445,7 +507,7 @@ class TestSexFeaturesExtractor:
         assert X_transformed.loc[101, config.REPRODUCTIVE_STATUS_COL] == "Intact"
         assert X_transformed.loc[102, config.REPRODUCTIVE_STATUS_COL] == "Unknown"
 
-    
+
     def test_sex_extractor_missing_column(self):
         """Verify that a missing sex column is an error.
 
@@ -463,10 +525,13 @@ class TestSexFeaturesExtractor:
 
         GIVEN: a DataFrame where all entries in sex are NaN
         WHEN: fit_transform is executed on SexFeaturesExtractor
-        THEN: the reproductive status feature resolves to 'Unknown' for all rows, preserving the index
+        THEN: the reproductive status feature resolves to 'Unknown' for all rows, preserving the
+              index
         """
         X_train = pd.DataFrame({config.SEX_COL: [np.nan, np.nan]}, index=[10, 20])
-        expected = pd.Series(["Unknown", "Unknown"], index=[10, 20], name=config.REPRODUCTIVE_STATUS_COL)
+        expected = pd.Series(
+            ["Unknown", "Unknown"], index=[10, 20], name=config.REPRODUCTIVE_STATUS_COL
+        )
 
         X_transformed = SexFeaturesExtractor().fit_transform(X_train)
         pd.testing.assert_series_equal(X_transformed[config.REPRODUCTIVE_STATUS_COL], expected)
@@ -476,14 +541,17 @@ class TestSexFeaturesExtractor:
 #                         NAME FEATURE TESTS
 # =====================================================================
 class TestNameFeaturesExtractor:
+    """Testing the has-a-name indicator derived from the raw name column."""
 
     def test_name_extractor_success(self):
-        """Verify that NameFeaturesExtractor correctly creates the name indicator and drops the raw column.
+        """Verify that NameFeaturesExtractor correctly creates the name indicator and drops the raw
+           column.
 
         GIVEN: a DataFrame with standard valid names and the placeholder "Unknown",
                with custom non-default indices
         WHEN: fit_transform is executed on NameFeaturesExtractor
-        THEN: the raw name column is dropped, name indicator is 1 for valid names and 0 for 'Unknown',
+        THEN: the raw name column is dropped, name indicator is 1 for valid names and 0 for
+              'Unknown',
               and the original index is preserved
         """
         X_train = pd.DataFrame(
@@ -506,7 +574,8 @@ class TestNameFeaturesExtractor:
 
         GIVEN: a DataFrame with 'Unknown' in various casings and extra surrounding spaces
         WHEN: fit_transform is executed on NameFeaturesExtractor
-        THEN: the name indicator resolves correctly to 0 for unknown/empty variations and 1 for valid names
+        THEN: the name indicator resolves correctly to 0 for unknown/empty variations and 1 for
+              valid names
         """
         X_train = pd.DataFrame(
              {config.NAME_COL: ["  Bella  ", "unknown", "  UNKNOWN  ", "   "]},
@@ -588,6 +657,9 @@ class TestNameFeaturesExtractor:
 
 # ----------------- EXTRACT PRIMARY COLOR -----------------
 class TestHelperFunctionColor:
+    """Testing extract_primary_color, the helper isolating the first color in a slash-separated
+       list."""
+
     def test_extract_primary_color_logic(self):
         """Verify that only the primary color is extracted by splitting on '/'.
 
@@ -608,7 +680,8 @@ class TestHelperFunctionColor:
         pd.testing.assert_series_equal(result, expected)
 
     def test_extract_primary_color_handles_nulls(self):
-        """Verify primary color extraction on a Series containing both valid strings and NaN entries.
+        """Verify primary color extraction on a Series containing both valid strings and NaN
+           entries.
 
         GIVEN: a Series with a valid color string ('Black/White') and a missing value (NaN)
         WHEN: extract_primary_color is executed
@@ -654,7 +727,8 @@ class TestHelperFunctionColor:
     def test_extract_primary_color_formatting_variations(self):
         """Verify primary color extraction with multiple slashes, extra spaces, and single colors.
 
-        GIVEN: a Series containing multiple slashes ('Black/White/Brown'), surrounding spaces, and single colors
+        GIVEN: a Series containing multiple slashes ('Black/White/Brown'), surrounding spaces, and
+               single colors
         WHEN: extract_primary_color is executed
         THEN: only the first color component is extracted and trimmed, preserving the index
         """
@@ -671,9 +745,12 @@ class TestHelperFunctionColor:
 # ----------------- EXTRACT PRIMARY BREED -----------------
 
 class TestHelperFunctionBreed:
+    """Testing extract_primary_breed, the helper isolating the first breed and stripping the 'Mix'
+       suffix."""
 
     def test_extract_primary_breed_logic(self):
-        """Verify that the primary breed is correctly extracted by splitting '/' and stripping 'Mix'.
+        """Verify that the primary breed is correctly extracted by splitting '/' and stripping
+           'Mix'.
 
         GIVEN: a Series containing crossbreeds with slashes, 'Mix' suffixes, and purebreds,
            with custom indices
@@ -681,12 +758,12 @@ class TestHelperFunctionBreed:
         THEN: the 'Mix' keyword and second breeds are removed, leaving only the
               clean primary breed, preserving the index
         """
-   
+
         breed_series = pd.Series(
             [
-            "Labrador Retriever/German Shepherd",  
-            "Chihuahua Shorthair Mix",  
-            "Siamese",  
+            "Labrador Retriever/German Shepherd",
+            "Chihuahua Shorthair Mix",
+            "Siamese",
             ],
             index=[15, 25, 35],
         )
@@ -700,7 +777,8 @@ class TestHelperFunctionBreed:
         pd.testing.assert_series_equal(result, expected)
 
     def test_extract_primary_breed_handles_nulls(self):
-        """Verify primary breed extraction on a Series containing both valid strings and NaN entries.
+        """Verify primary breed extraction on a Series containing both valid strings and NaN
+           entries.
 
         GIVEN: a Series with a valid breed string ('Chihuahua Mix') and a missing value (NaN)
         WHEN: extract_primary_breed is executed
@@ -744,11 +822,14 @@ class TestHelperFunctionBreed:
 
 
     def test_extract_primary_breed_formatting_variations(self):
-        """Verify primary breed extraction with case variations of 'mix', multiple slashes, and clean breeds.
+        """Verify primary breed extraction with case variations of 'mix', multiple slashes, and
+           clean breeds.
 
-        GIVEN: a Series with 'mix' in different casing ('MIX', 'mix'), multiple slashes, and pure breeds
+        GIVEN: a Series with 'mix' in different casing ('MIX', 'mix'), multiple slashes, and pure
+               breeds
         WHEN: extract_primary_breed is executed
-        THEN: trailing 'mix' keywords and secondary breeds are stripped regardless of casing, preserving the index
+        THEN: trailing 'mix' keywords and secondary breeds are stripped regardless of casing,
+              preserving the index
         """
         breed_series = pd.Series(
             [
@@ -776,6 +857,7 @@ class TestHelperFunctionBreed:
 # -------------------- FIT TESTS --------------------
 
 class TestRareCategoriesGrouperFit:
+    """Testing the frequent categories RareCategoriesGrouper learns from the training frame."""
 
     def test_rare_categories_grouper_learns_frequent_categories(self):
         """Verify that fit learns frequent categories above threshold.
@@ -793,7 +875,8 @@ class TestRareCategoriesGrouperFit:
         assert set(grouper.frequent_categories_[config.BREED_COL]) == {"A", "B"}
 
     def test_rare_categories_grouper_fit_raises_on_missing_column(self):
-        """Verify that RareCategoriesGrouper raises a ValueError if a required column is missing during fit.
+        """Verify that RareCategoriesGrouper raises a ValueError if a required column is missing
+           during fit.
 
         GIVEN: a DataFrame missing a required column specified in the grouper's target configuration
         WHEN: the fit method is executed
@@ -805,12 +888,16 @@ class TestRareCategoriesGrouperFit:
         with pytest.raises(ValueError, match=config.BREED_COL):
             grouper.fit(X_train)
 
-    def test_rare_categories_grouper_fit_learns_nothing_from_an_empty_column(self, caplog: pytest.LogCaptureFixture):
-        """Verify that RareCategoriesGrouper handles completely empty/NaN columns during fit safely with a warning.
+    def test_rare_categories_grouper_fit_learns_nothing_from_an_empty_column(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        """Verify that RareCategoriesGrouper handles completely empty/NaN columns during fit safely
+           with a warning.
 
         GIVEN: a training DataFrame containing only missing values (NaN) in the target column
         WHEN: the fit method is executed with WARNING logging level captured
-        THEN: a warning log is recorded, execution doesn't crash, and frequent categories is set to empty tuple
+        THEN: a warning log is recorded, execution doesn't crash, and frequent categories is set to
+              empty tuple
         """
         X_train = pd.DataFrame({config.BREED_COL: [np.nan, np.nan]})
         grouper = RareCategoriesGrouper(columns=(config.BREED_COL,))
@@ -841,9 +928,12 @@ class TestRareCategoriesGrouperFit:
 # -------------------- TRANSFORM TESTS --------------------
 
 class TestRareCategoriesGrouperTransform:
+    """Testing the collapsing of infrequent categories into 'Other' once RareCategoriesGrouper is
+       fitted."""
 
     def test_rare_categories_grouper_raises_not_fitted_error_when_unfitted(self):
-        """Verify that RareCategoriesGrouper raises a NotFittedError if transform is called before fit.
+        """Verify that RareCategoriesGrouper raises a NotFittedError if transform is called before
+           fit.
 
         GIVEN: a RareCategoriesGrouper instance that has not been fitted yet
         WHEN: the transform method is executed on a DataFrame
@@ -880,7 +970,8 @@ class TestRareCategoriesGrouperTransform:
     def test_rare_categories_grouper_success(self):
         """Verify that categories are dynamically preserved to keep 'Other' below the max ratio.
 
-        GIVEN: a fitted RareCategoriesGrouper instance and a DataFrame with frequent and rare categories
+        GIVEN: a fitted RareCategoriesGrouper instance and a DataFrame with frequent and rare
+               categories
         WHEN: transform is executed
         THEN: frequent categories are preserved and rare categories are replaced with 'Other'
         """
@@ -900,7 +991,8 @@ class TestRareCategoriesGrouperTransform:
     def test_rare_categories_grouper_preserves_nans(self):
         """Verify that NaN values are untouched and not converted to 'Other' during transform.
 
-        GIVEN: a RareCategoriesGrouper with pre-learned frequent categories ('A' and 'B') and input with NaNs
+        GIVEN: a RareCategoriesGrouper with pre-learned frequent categories ('A' and 'B') and input
+               with NaNs
         WHEN: transform is executed
         THEN: NaN values remain NaN, preserving the index
         """
@@ -912,7 +1004,7 @@ class TestRareCategoriesGrouperTransform:
         )
 
         grouper = RareCategoriesGrouper(columns=(config.BREED_COL,), max_other_ratio=0.25)
-        grouper.fit(X_train) 
+        grouper.fit(X_train)
         X_clean = grouper.transform(X_train)
 
         pd.testing.assert_series_equal(X_clean[config.BREED_COL], expected)
@@ -920,7 +1012,8 @@ class TestRareCategoriesGrouperTransform:
     def test_rare_categories_grouper_preserves_index_and_non_target_columns(self):
         """Verify that transform preserves original row indices and untouched columns.
 
-        GIVEN: a fitted grouper and a DataFrame with target and non-target columns and custom indices
+        GIVEN: a fitted grouper and a DataFrame with target and non-target columns and custom
+               indices
         WHEN: transform is executed
         THEN: the original index and non-target columns remain completely unchanged
         """
@@ -928,7 +1021,9 @@ class TestRareCategoriesGrouperTransform:
             {config.BREED_COL: ["Labrador"] * 8 + ["Chihuahua"] * 2, "Other_Col": range(10)},
             index=[10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         )
-        grouper = RareCategoriesGrouper(columns=(config.BREED_COL,), max_other_ratio=0.25).fit(X_train)
+        grouper = RareCategoriesGrouper(
+            columns=(config.BREED_COL,), max_other_ratio=0.25
+        ).fit(X_train)
 
         X_clean = grouper.transform(X_train)
 
@@ -936,7 +1031,8 @@ class TestRareCategoriesGrouperTransform:
         pd.testing.assert_series_equal(X_clean["Other_Col"], X_train["Other_Col"])
 
     def test_rare_categories_grouper_logs_debug_on_drift(self, caplog: pytest.LogCaptureFixture):
-        """Verify that transform emits a DEBUG log when 'Other' proportion exceeds max ratio due to data drift.
+        """Verify that transform emits a DEBUG log when 'Other' proportion exceeds max ratio due to
+           data drift.
 
         GIVEN: a trained grouper and a test dataset containing only rare categories
         WHEN: transform is executed on the test dataset
@@ -956,7 +1052,8 @@ class TestRareCategoriesGrouperTransform:
     def test_rare_categories_grouper_empty_dataframe(self):
         """Verify that transform returns an empty DataFrame untouched if the input is empty.
 
-        GIVEN: a properly fitted RareCategoriesGrouper instance and a completely empty test DataFrame schema
+        GIVEN: a properly fitted RareCategoriesGrouper instance and a completely empty test
+               DataFrame schema
         WHEN: fit and transform methods are executed
         THEN: the input DataFrame is returned completely unmodified, preserving its empty structure
         """
@@ -973,6 +1070,8 @@ class TestRareCategoriesGrouperTransform:
 # -------------------- END TO END, CUSTOM & EDGE CASES --------------------
 
 class TestRareCategoriesGrouperCustomAndE2E:
+    """Testing RareCategoriesGrouper end to end, including leakage prevention and degenerate
+       frames."""
 
     def test_rare_categories_grouper_all_nan(self):
         """Verify robust handling of a DataFrame column composed entirely of missing entries.
@@ -991,7 +1090,8 @@ class TestRareCategoriesGrouperCustomAndE2E:
     def test_rare_categories_grouper_prevents_data_leakage(self):
         """Verify that test set grouping strictly uses frequent categories learned during training.
 
-        GIVEN: a grouper trained on X_train with breed and color columns and a test set with unseen labels
+        GIVEN: a grouper trained on X_train with breed and color columns and a test set with unseen
+               labels
         WHEN: transform is called on the test set
         THEN: rare/unseen labels are mapped to 'Other' based solely on train statistics
         """
@@ -1003,7 +1103,9 @@ class TestRareCategoriesGrouperCustomAndE2E:
             config.BREED_COL: ["Beagle", "Chihuahua"],
             config.COLOR_COL: ["Black", "Black"],
         })
-        grouper = RareCategoriesGrouper(columns=(config.BREED_COL, config.COLOR_COL,), max_other_ratio=0.25).fit(X_train)
+        grouper = RareCategoriesGrouper(
+            columns=(config.BREED_COL, config.COLOR_COL,), max_other_ratio=0.25
+        ).fit(X_train)
         X_test_clean = grouper.transform(X_test)
 
         expected_breed = pd.Series(["Other", "Other"], name=config.BREED_COL)
@@ -1016,14 +1118,15 @@ class TestRareCategoriesGrouperCustomAndE2E:
     "max_ratio, expected_frequent",
     [
             (0.0, {"A", "B", "C"}),
-            (0.25, {"A", "B"}),  
-            (0.50, {"A"}),       
+            (0.25, {"A", "B"}),
+            (0.50, {"A"}),
         ],
     )
     def test_rare_categories_grouper_custom_max_other_ratio(
         self, max_ratio, expected_frequent
     ):
-        """Verify that custom max_other_ratio values dynamically alter the learned frequent categories.
+        """Verify that custom max_other_ratio values dynamically alter the learned frequent
+           categories.
 
         GIVEN: a DataFrame with unbalanced categorical frequencies (A: 60%, B: 20%, C: 20%)
         WHEN: fit is executed with different max_other_ratio thresholds
@@ -1034,9 +1137,11 @@ class TestRareCategoriesGrouperCustomAndE2E:
              config.COLOR_COL: ["Black"] * 10,
              }
         )
-        grouper = RareCategoriesGrouper(columns=(config.BREED_COL, config.COLOR_COL,), max_other_ratio=max_ratio)
+        grouper = RareCategoriesGrouper(
+            columns=(config.BREED_COL, config.COLOR_COL,), max_other_ratio=max_ratio
+        )
         grouper.fit(X_train)
-        
+
         assert set(grouper.frequent_categories_[config.BREED_COL]) == expected_frequent
         assert set(grouper.frequent_categories_[config.COLOR_COL]) == {"Black"}
 
@@ -1048,7 +1153,7 @@ class TestRareCategoriesGrouperCustomAndE2E:
 # -------------------- FIT TESTS --------------------
 
 class TestCategoricalFeaturesEngineerFit:
-
+    """Testing the internal RareCategoriesGrouper that CategoricalFeaturesEngineer fits."""
 
     def test_categorical_features_engineer_initializes_and_fits_grouper(self):
         """Verify that fit initializes and fits the internal RareCategoriesGrouper instance.
@@ -1068,7 +1173,9 @@ class TestCategoricalFeaturesEngineerFit:
         assert isinstance(engineer.grouper_, RareCategoriesGrouper)
         assert set(engineer.grouper_.frequent_categories_) == {config.BREED_COL, config.COLOR_COL}
 
-    def test_categorical_features_engineer_fit_learns_nothing_from_an_empty_column(self, caplog: pytest.LogCaptureFixture):
+    def test_categorical_features_engineer_fit_learns_nothing_from_an_empty_column(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """Verify that an all-missing column is fitted safely, with a warning.
 
         GIVEN: a training DataFrame containing only missing values (NaN) in target columns
@@ -1076,7 +1183,9 @@ class TestCategoricalFeaturesEngineerFit:
         THEN: a warning is recorded and the internal grouper learns an empty
               set of frequent categories rather than crashing
         """
-        X_train = pd.DataFrame({config.BREED_COL: [np.nan, np.nan], config.COLOR_COL: [np.nan, np.nan]})
+        X_train = pd.DataFrame(
+            {config.BREED_COL: [np.nan, np.nan], config.COLOR_COL: [np.nan, np.nan]}
+        )
         engineer = CategoricalFeaturesEngineer(columns=(config.BREED_COL, config.COLOR_COL))
 
         with caplog.at_level(logging.WARNING):
@@ -1124,6 +1233,7 @@ class TestCategoricalFeaturesEngineerFit:
 # -------------------- TRANSFORM TESTS --------------------
 
 class TestCategoricalFeaturesEngineerTransform:
+    """Testing the mix indicator, primary-form reduction, and rare-category binning once fitted."""
 
     def test_categorical_features_engineer_success(self):
         """Verify that the mix indicator, the primary forms and the binning combine.
@@ -1167,7 +1277,8 @@ class TestCategoricalFeaturesEngineerTransform:
         pd.testing.assert_series_equal(X_clean[config.COLOR_COL], expected_color)
 
     def test_categorical_features_engineer_raises_not_fitted_error_when_unfitted(self):
-        """Verify that CategoricalFeaturesEngineer raises a NotFittedError if transform is called before fit.
+        """Verify that CategoricalFeaturesEngineer raises a NotFittedError if transform is called
+           before fit.
 
         GIVEN: a CategoricalFeaturesEngineer instance that has not been fitted yet
         WHEN: the transform method is executed on a DataFrame
@@ -1176,11 +1287,14 @@ class TestCategoricalFeaturesEngineerTransform:
         X_train = pd.DataFrame({config.BREED_COL: ["A", "B"], config.COLOR_COL: ["Black", "White"]})
         engineer = CategoricalFeaturesEngineer()
 
-        with pytest.raises(NotFittedError, match="CategoricalFeaturesEngineer instance is not fitted"):
+        with pytest.raises(
+            NotFittedError, match="CategoricalFeaturesEngineer instance is not fitted"
+        ):
             engineer.transform(X_train)
 
     def test_categorical_features_engineer_preserves_nans(self):
-        """Verify that missing values (NaN) in breed and color columns are preserved and mix indicator is 0.
+        """Verify that missing values (NaN) in breed and color columns are preserved and mix
+           indicator is 0.
 
         GIVEN: a DataFrame containing missing values (NaN) in breed and color columns
         WHEN: transform is executed
@@ -1229,12 +1343,17 @@ class TestCategoricalFeaturesEngineerTransform:
 
         GIVEN: a fitted CategoricalFeaturesEngineer and an empty DataFrame with valid schema
         WHEN: transform is executed
-        THEN: the returned DataFrame is empty, and expected schema (breed, color, mix indicator) is created
+        THEN: the returned DataFrame is empty, and expected schema (breed, color, mix indicator) is
+              created
         """
-        X_train = pd.DataFrame({config.BREED_COL: ["Labrador Mix"], config.COLOR_COL: ["Black/White"]})
+        X_train = pd.DataFrame(
+            {config.BREED_COL: ["Labrador Mix"], config.COLOR_COL: ["Black/White"]}
+        )
         X_empty = pd.DataFrame(columns=(config.BREED_COL, config.COLOR_COL))
 
-        engineer = CategoricalFeaturesEngineer(columns=(config.BREED_COL, config.COLOR_COL)).fit(X_train)
+        engineer = CategoricalFeaturesEngineer(
+            columns=(config.BREED_COL, config.COLOR_COL)
+        ).fit(X_train)
         X_transformed = engineer.transform(X_empty)
 
         assert X_transformed.empty
@@ -1243,7 +1362,8 @@ class TestCategoricalFeaturesEngineerTransform:
     def test_categorical_features_engineer_transform_raises_on_missing_column(self):
         """Verify transform behavior when one fitted column is missing during inference.
 
-        GIVEN: a CategoricalFeaturesEngineer fitted on both breed and color, and a test DataFrame missing breed
+        GIVEN: a CategoricalFeaturesEngineer fitted on both breed and color, and a test DataFrame
+               missing breed
         WHEN: transform is executed on the test DataFrame
         THEN: a ValueError names the missing column, since going ahead would
               silently drop both the mix indicator and the binning of breed
@@ -1259,10 +1379,13 @@ class TestCategoricalFeaturesEngineerTransform:
         with pytest.raises(ValueError, match=config.BREED_COL):
             engineer.transform(X_test)
 
-    def test_categorical_features_engineer_logs_debug_on_drift(self, caplog: pytest.LogCaptureFixture):
+    def test_categorical_features_engineer_logs_debug_on_drift(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """Verify debug log emission on data drift.
 
-        GIVEN: a fitted CategoricalFeaturesEngineer instance, and a test DataFrame experiencing data drift
+        GIVEN: a fitted CategoricalFeaturesEngineer instance, and a test DataFrame experiencing data
+               drift
         WHEN: transform is executed on the test dataset with DEBUG logging level captured
         THEN: a DEBUG log message is recorded indicating that 'Other' ratio exceeds max_other_ratio
         """
@@ -1285,6 +1408,7 @@ class TestCategoricalFeaturesEngineerTransform:
 # -------------------- END TO END, CUSTOM & EDGE CASES --------------------
 
 class TestCategoricalFeaturesEngineerCustomAndE2E:
+    """Testing CategoricalFeaturesEngineer end to end on degenerate all-missing and empty frames."""
 
     def test_categorical_features_engineer_all_nan(self):
         """Verify robust handling when breed and color columns contain only missing entries.
@@ -1312,7 +1436,8 @@ class TestCategoricalFeaturesEngineerCustomAndE2E:
     def test_categorical_features_engineer_prevents_data_leakage(self):
         """Verify that test set category grouping strictly uses statistics learned during training.
 
-        GIVEN: an engineer trained on X_train (frequent breed: 'Labrador') and a test set with unseen labels
+        GIVEN: an engineer trained on X_train (frequent breed: 'Labrador') and a test set with
+               unseen labels
         WHEN: transform is called on the test set
         THEN: unseen breeds are mapped to 'Other' based strictly on training set statistics
         """
@@ -1338,7 +1463,8 @@ class TestCategoricalFeaturesEngineerCustomAndE2E:
         pd.testing.assert_series_equal(X_test_clean[config.COLOR_COL], expected_color)
 
     def test_categorical_features_engineer_custom_max_other_ratio(self):
-        """Verify that max_other_ratio custom parameter is passed down to internal RareCategoriesGrouper.
+        """Verify that max_other_ratio custom parameter is passed down to internal
+           RareCategoriesGrouper.
 
         GIVEN: a custom max_other_ratio value (0.5) and a training dataset with breed and color
         WHEN: CategoricalFeaturesEngineer executes fit
@@ -1392,4 +1518,3 @@ class TestCategoricalFeaturesEngineerCustomAndE2E:
         ).fit_transform(X)
 
         pd.testing.assert_series_equal(X_transformed[config.COLOR_COL], X[config.COLOR_COL])
-  
