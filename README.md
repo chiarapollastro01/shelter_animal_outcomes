@@ -148,6 +148,10 @@ file can be swapped without a commit:
 snakemake --cores all --configfile experiments/wide_grid.yaml
 ```
 
-Adding a species is a one-line change to `config.SPECIES`: the Snakefile
-derives its wildcards from it, so a third model would be trained and evaluated
-without touching anything else.
+## Generality
+
+The dataset schema lives in one file: column names are read from
+`src/config.py` and never spelled out in the modules; the transformers take them as constructor parameters, so renaming `AgeuponOutcome` means editing one line. Adding a species is a one-line change to `config.SPECIES`. This is asserted, not assumed:
+`test_extractors_support_custom_column_names`
+runs every transformer against renamed columns, `TestDataCleanerCustomAndE2E` covers custom fill targets and dropped columns, and the training tests are parametrised over `config.SPECIES` rather than over `Dog` and `Cat`.
+

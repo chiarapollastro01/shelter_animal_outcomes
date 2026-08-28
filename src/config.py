@@ -10,18 +10,35 @@ Provides:
 
 Notes
 -----
-It was decided to create two configuration files because this module describes the data, therefore 
+It was decided to create two configuration files because this module describes the data, therefore
 changing any of it is a code change. "config.yaml", instead, contains what describes a run:
 the split proportions, the number of cross-validation folds, the scoring metrics etc. Changing
 any of these is an analysis decision. "RANDOM_STATE" deliberately sist on this since
-it's just a guarantee of replicability, so it's fixed. 
+it's just a guarantee of replicability, so it's fixed.
 Importing this module has no side effect: the YAML file is read only when
 "load_params" is called.
+-------------------
+This module is the only place the dataset schema is written down. Every
+column name below is read from here, never spelled out in the modules, and
+every transformer takes its column names as an __init__ parameter defaulting
+to one of these constants. Renaming a column in the source data is therefore
+a one-line change here, and adding a species is a one-line change to SPECIES:
+the Snakefile derives its wildcards from it, train validates --species
+against it, and evaluate loops over it, so a third model would be trained and
+evaluated without touching anything else.
+
+The boundary: the names of the columns the transformers write are fixed
+(config.LOG_AGE_COL, config.IS_MIX_COL and the cyclical ones), because
+NUM_SCALE_COLS and CAT_ENCODE_COLS have to name them for the ColumnTransformer
+downstream. Adding a derived feature means declaring it in one of those two
+tuples, not just producing it.
 """
 
 from pathlib import Path
 from typing import Any
+
 import yaml
+
 
 # --- DATASET SCHEMA ---
 
@@ -148,7 +165,7 @@ def load_params(path: Path = CONFIG_FILE_PATH) -> dict[str, Any]:
     ------
     FileNotFoundError
         If the file does not exist.
-    
+
     ValueError
         If the YAML file is empty or just commented.
     """
