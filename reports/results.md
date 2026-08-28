@@ -89,7 +89,7 @@ into the average.
 
 ### Per class
 
-The previous metrics average over the four classes, whose support differs  
+The previous metrics average over the five classes, whose support differs  
 substantially. Therefore it's interestin to read one class at a time:
 
 **Dogs** (3 119 test rows)

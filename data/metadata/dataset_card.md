@@ -24,16 +24,16 @@ competition page and place it at `data/raw_data/train.csv`. Its checksum is in
 
 | Column | Meaning |
 | --- | --- |
-| `AnimalID` | Identifier of the record. Carries no signal and is dropped. |
+| `AnimalID` | Unique ID assigned upon intake, carries no signal and it is dropped. |
 | `Name` | Given name. Missing for animals that arrived unnamed. |
-| `DateTime` | Timestamp of the outcome, to the minute. |
+| `DateTime` | Timestamp of when the outcome was recorded, to the minute. |
 | `OutcomeType` | **Target.** Five classes, see below. |
 | `OutcomeSubtype` | Further detail on the outcome. Leaks the target and is dropped. |
-| `AnimalType` | `Dog` or `Cat`. Splits the analysis into two independent tracks. |
+| `AnimalType` | Species: `Dog` or `Cat`. Splits the analysis into two independent tracks. |
 | `SexuponOutcome` | Sex and reproductive status in one string, e.g. `Neutered Male`. |
-| `AgeuponOutcome` | Free text, e.g. `2 years`, `3 weeks`. |
-| `Breed` | Breed of the animal, encodes crosses as `A/B` and mixed breed as `Mix`. |
-| `Color` | Color of the animal, encodes two-tone coats as `A/B`. |
+| `AgeuponOutcome` | Age of the animal at outcome time, free text, e.g. `2 years`, `3 weeks`. |
+| `Breed` | Breed description, encodes crosses as `A/B` and mixed breed as `Mix`. |
+| `Color` | Color description, encodes two-tone coats as `A/B`. |
 
 ## Target distribution
 
