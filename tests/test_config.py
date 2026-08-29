@@ -1,14 +1,14 @@
-"""Unit tests for the project configuration module (src/config.py).
+"""Tests for the project configuration module (src/config.py).
 
 """
-
 from pathlib import Path
+
 import pytest
-import yaml
 from sklearn.metrics import get_scorer
-from src.pipeline import available_models
+import yaml
 
 from src import config
+from src.pipeline import available_models
 
 # Constants are addressed by name rather than by value: getattr resolves at
 # call time, so a renamed constant fails the single test that reads it instead
@@ -90,11 +90,6 @@ def params_file(tmp_path: Path) -> Path:
     return path
 
 
-# =====================================================================
-#                        RAW COLUMN SCHEMA
-# =====================================================================
-
-
 class TestRawSchema:
     """Testing constants naming the columns of the raw Kaggle file."""
 
@@ -109,7 +104,7 @@ class TestRawSchema:
         declared = {name for name in dir(config) if name.endswith("_COL")}
 
         assert declared == set(RAW_SCHEMA_NAMES) | set(ENGINEERED_SCHEMA_NAMES)
-        
+
     @pytest.mark.parametrize("constant_name", RAW_SCHEMA_NAMES)
     def test_raw_column_is_a_nonempty_string(self, constant_name: str):
         """Every raw column constant is a usable pandas column key.
@@ -132,11 +127,6 @@ class TestRawSchema:
         values = tuple(getattr(config, name) for name in RAW_SCHEMA_NAMES)
 
         assert len(set(values)) == len(values)
-
-
-# =====================================================================
-#                     ENGINEERED COLUMN SCHEMA
-# =====================================================================
 
 
 class TestEngineeredSchema:
@@ -177,11 +167,6 @@ class TestEngineeredSchema:
         engineered = {getattr(config, name) for name in ENGINEERED_SCHEMA_NAMES}
 
         assert not raw & engineered
-
-
-# =====================================================================
-#                          FEATURE GROUPS
-# =====================================================================
 
 
 class TestFeatureGroups:
@@ -256,9 +241,6 @@ class TestFeatureGroups:
 
         assert set(config.NUM_SCALE_COLS) <= engineered
 
-# =====================================================================
-#                       EXECUTION SETTINGS
-# =====================================================================
 
 class TestExecutionSettings:
     """Testing the two constants fixed for the whole project rather than per run."""
@@ -292,9 +274,6 @@ class TestExecutionSettings:
         """
         assert all(isinstance(name, str) and name for name in config.SPECIES)
 
-# =====================================================================
-#                             PATHS
-# =====================================================================
 
 class TestPaths:
     """Testing filesystem locations derived from the project root."""
@@ -310,9 +289,6 @@ class TestPaths:
 
         assert package_dir.parent == config.PROJECT_ROOT
 
-# =====================================================================
-#                       FILE NAMING CONVENTIONS
-# =====================================================================
 
 class TestFileNames:
     """Testing the names of the artefacts exchanged between the pipeline steps."""
@@ -345,9 +321,37 @@ class TestFileNames:
 
         assert len(filenames) == len(config.SPECIES)
 
-# =====================================================================
-#                           LOAD_PARAMS
-# =====================================================================
+    def test_metadata_template_separates_the_species(self):
+        """Two species never map onto the same metadata sidecar.
+
+        GIVEN: the SPECIES tuple and the metadata template
+        WHEN: the template is formatted once per species
+        THEN: the filenames are all distinct, so no tournament overwrites the
+              sidecar of another
+        """
+        filenames = {
+            config.MODEL_METADATA_FILE_TEMPLATE.format(species=species.lower())
+            for species in config.SPECIES
+        }
+
+        assert len(filenames) == len(config.SPECIES)
+
+    def test_metadata_template_sits_next_to_its_model(self):
+        """The sidecar shares the name of the model it describes.
+
+        GIVEN: the model template and the metadata template
+        WHEN: both are formatted for the same species
+        THEN: they differ only in the suffix, which is what lets the Snakefile
+              declare the two as outputs of a single rule and what makes the
+              pairing readable in the models directory
+        """
+        species = config.SPECIES[0].lower()
+        model = Path(config.MODEL_FILE_TEMPLATE.format(species=species))
+        metadata = Path(config.MODEL_METADATA_FILE_TEMPLATE.format(species=species))
+
+        assert model.stem == metadata.stem
+        assert model.suffix != metadata.suffix
+
 
 class TestLoadParams:
     """Testing the reading of the run parameters out of a YAML file."""
@@ -402,11 +406,6 @@ class TestLoadParams:
 
         with pytest.raises(yaml.YAMLError):
             config.load_params(path)
-
-
-# =====================================================================
-#                     THE SHIPPED CONFIG.YAML
-# =====================================================================
 
 
 class TestShippedParameters:

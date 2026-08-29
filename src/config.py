@@ -2,7 +2,7 @@
 
 Provides:
 - Raw dataset column definitions.
-- Feature grouping rules .
+- Feature grouping rules.
 - The two constants that are fixed once for the whole project rather than
   chosen per run: the random state and the set of species.
 - File and directory paths resolved dynamically from PROJECT_ROOT.
@@ -13,7 +13,7 @@ Notes
 It was decided to create two configuration files because this module describes the data, therefore
 changing any of it is a code change. "config.yaml", instead, contains what describes a run:
 the split proportions, the number of cross-validation folds, the scoring metrics etc. Changing
-any of these is an analysis decision. "RANDOM_STATE" deliberately sist on this since
+any of these is an analysis decision. "RANDOM_STATE" deliberately sits outside of this since
 it's just a guarantee of replicability, so it's fixed.
 Importing this module has no side effect: the YAML file is read only when
 "load_params" is called.
@@ -59,7 +59,7 @@ ID_COL: str = "AnimalID"
 # the answer, so leaving either in the feature matrix would result in data leakage.
 NON_FEATURE_COLS: tuple[str, ...] = (TARGET_COL, SUBTARGET_COL)
 
-# Default columns of CategoricalFeaturesEngineer, charachterized by high-cardinality:
+# Default columns of CategoricalFeaturesEngineer, characterized by high-cardinality:
 # rare entries are collapsed into "Other" before one-hot encoding
 CATEGORICAL_COLS: tuple[str, ...] = (BREED_COL, COLOR_COL)
 
@@ -70,8 +70,8 @@ FILL_TARGETS: tuple[str, ...] = (NAME_COL, BREED_COL, COLOR_COL)
 # Default columns to remove of DataCleaner: identifiers that carry no signal
 COLUMNS_TO_REMOVE: tuple[str, ...] = (ID_COL,)
 
-# Passed to drop_rows_missing_critical, outside the pipeline: rows missing any of
-# these cannot be used at all, since neither can be successfully imputed
+# Passed to drop_rows_missing_required, outside the pipeline: rows missing any of
+# these cannot be used at all, since none of them can be successfully imputed
 ROW_REQUIRED_COLS: tuple[str, ...] = (DATETIME_COL, SPECIES_COL)
 
 
@@ -99,7 +99,7 @@ NUM_SCALE_COLS: tuple[str, ...] = (
     LOG_AGE_COL,
 )
 
-# Binary columns that are one-hot encoded
+# Multi-level categorical columns that are one-hot encoded
 CAT_ENCODE_COLS: tuple[str, ...] = (BREED_COL, COLOR_COL, REPRODUCTIVE_STATUS_COL)
 
 # --- GLOBAL EXECUTION & MODEL SETTINGS ---
@@ -140,6 +140,9 @@ METRICS_FILE: str = "metrics.json"
 
 # Written by train, loaded back by evaluate. {species} is filled in lowercase.
 MODEL_FILE_TEMPLATE: str = "best_shelter_model_{species}.pkl"
+
+# Metadata sidecar written by train next to the model it describes.
+MODEL_METADATA_FILE_TEMPLATE: str = "best_shelter_model_{species}.json"
 
 
 # --- RUN PARAMETERS (config.yaml) ---

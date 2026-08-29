@@ -15,7 +15,7 @@ snakemake --cores all --forceall   # rebuild from scratch
 """
 
 import sys
-from pathlib import Pathcl
+from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -26,7 +26,8 @@ configfile: "config.yaml"
 
 
 SPECIES_BY_KEY = {species.lower(): species for species in project_config.SPECIES}
-
+MODEL_PATTERN = "models/" + project_config.MODEL_FILE_TEMPLATE
+MODEL_METADATA_PATTERN = "models/" + project_config.MODEL_METADATA_FILE_TEMPLATE
 
 rule all:
     input:
@@ -55,7 +56,8 @@ rule train:
         target="data/split_data/train_target.csv",
         params="config.yaml",
     output:
-        "models/best_shelter_model_{species}.pkl",
+        model=MODEL_PATTERN,
+        metadata=MODEL_METADATA_PATTERN,
     threads: workflow.cores or 1
     params:
         name=lambda wildcards: SPECIES_BY_KEY[wildcards.species],

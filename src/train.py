@@ -189,8 +189,9 @@ def run_tournament(
         One complete grid per classifier family, as returned by
         `merge_search_grids`.
     run_params : Mapping[str, Any]
-        Run parameters read from the YAML file: holdout_size, cv_n_splits,
-        scoring and refit.
+        Run parameters read from the YAML file. Only `scoring` and `refit`
+        are used here; `holdout_size` and `cv_n_splits` are consumed earlier,
+        before the tournament runs.
 
     Returns
     -------
@@ -232,7 +233,7 @@ def run_tournament(
         )
 
         # Comparable across families because every GridSearchCV refits on
-        # the same metric: best_score_ is the mean CV score of that metric, in this case f1_macro.
+        # the same metric: best_score_ is the mean CV score of that metric.
         if best_search is None or search.best_score_ > best_search.best_score_:
             best_name, best_search = model_name, search
 
@@ -266,7 +267,7 @@ def train_one_species(
     models_dir : Path
         Directory where trained models and metadata will be saved.
     species : str
-        The animal species being processed (e.g., "dog", "cat").
+        The animal species being processed, as one of `config.SPECIES` (e.g., "Dog", "Cat").
     search_grids : Mapping[str, Mapping[str, list]]
         One complete grid per classifier family.
     run_params : Mapping[str, Any]
@@ -318,10 +319,12 @@ def train_one_species(
         species.upper(), classification_report(y_hold, y_pred),
     )
 
-    # The model name lives in config because evaluate has to find this file
-    # again. The sidecar name does not: nothing outside this module reads it
+    # Both names live in config: evaluate has to find the model again, and the
+    # Snakefile declares the sidecar as an output of this rule.
     model_path = models_dir / config.MODEL_FILE_TEMPLATE.format(species=species.lower())
-    metadata_path = model_path.with_suffix(".json")
+    metadata_path = models_dir / config.MODEL_METADATA_FILE_TEMPLATE.format(
+        species=species.lower()
+    )
 
     final_model = clone(best_search.best_estimator_).fit(X, y)
     joblib.dump(final_model, model_path)
@@ -414,7 +417,7 @@ def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
     -------
     argparse.Namespace
         Parsed arguments containing features_path, target_path, models_dir
-        and config_path.
+        config_path and species.
     """
 
     parser = argparse.ArgumentParser(description=__doc__)
