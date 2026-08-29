@@ -58,7 +58,7 @@ def dummy_test_data() -> tuple[pd.DataFrame, pd.Series]:
         }
     )
     y_test = pd.Series(
-        ["Adoption", "Transfer", "Adoption", "Euthanasia"],
+        ["Adoption", "Adoption", "Transfer", "Euthanasia"],
         name=config.TARGET_COL,
     )
     return X_test, y_test
