@@ -8,6 +8,9 @@ Exported Functions
 evaluate_model(model, X_test, y_test) -> dict[str, float]
     Function that computes the metrics of one fitted model on one test split.
 
+per_class_report(model, X_test, y_test) -> dict[str, dict[str, float]]
+    Function that breaks the same predictions down class by class.
+    
 load_test_data(test_features_path, test_target_path) -> tuple[...]
     Function that reads the two test files prepare_data wrote and fails fast
     if they have drifted out of alignment.
@@ -27,11 +30,9 @@ GridSearchCV; these describe the model that was already chosen, and are free to
 include log_loss, which scores the predicted probabilities rather than the
 predicted labels and so says whether the model believed its own answer.
 
-Note on mirroring the training preparation
-------------------------------------------
-The rows are filtered and split by species exactly as train did, and the
-species column is dropped just as it was there. A test set prepared any
-differently would be scored by a pipeline that never saw its shape.
+The per-class breakdown is here because the target is heavily imbalanced:
+on a split where one outcome covers half the rows, an aggregate score can look
+respectable while a rare class is never predicted at all.
 
 CLI Usage
 ---------
@@ -50,15 +51,41 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from pathlib import Path
+from typing import TypedDict
+
 import joblib
 import pandas as pd
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    classification_report,
+    f1_score,
+    log_loss,
+)
 
-from pathlib import Path
-from sklearn.metrics import accuracy_score, f1_score, log_loss
 from src import config
 from src.preprocessing import drop_rows_missing_required
 
 logger = logging.getLogger(__name__)
+
+class SpeciesReport(TypedDict):
+    """The evaluation block written for one species.
+
+    The two halves have different shapes on purpose: 'overall' summarises the
+    model in a flat mapping of floats, 'per_class' holds one such mapping per
+    outcome. Declaring them here is what lets main stay typed.
+
+    Attributes
+    ----------
+    overall : dict[str, float]
+        What evaluate_model returns.
+    per_class : dict[str, dict[str, float]]
+        What per_class_report returns.
+    """
+
+    overall: dict[str, float]
+    per_class: dict[str, dict[str, float]]
 
 def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, float]:
     """Compute key evaluation metrics on the test dataset.
@@ -78,6 +105,8 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, 
         Dictionary of calculated evaluation metrics:
         - 'log_loss': Multi-class logarithmic loss.
         - 'accuracy': Overall classification accuracy.
+        - 'balanced_accuracy': Mean of the per-class recalls. Unlike 
+          'accuracy' it cannot be inflated by getting the majority class right.
         - 'f1_macro': Unweighted mean of the per-class F1 scores, so every
           class counts the same regardless of how rare it is. This is the
           metric the training tournament selects on.
@@ -93,18 +122,72 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, 
         # even when a rare class is absent from this test split.
         "log_loss": float(log_loss(y_test, y_proba, labels=model.classes_)),
         "accuracy": float(accuracy_score(y_test, y_pred)),
+        "balanced_accuracy": float(balanced_accuracy_score(y_test, y_pred)),
         "f1_macro": float(f1_score(y_test, y_pred, average="macro")),
         "f1_weighted": float(f1_score(y_test, y_pred, average="weighted")),
     }
 
     logger.info(
-        "Evaluation Results -> Log Loss: %.4f | Accuracy: %.4f | F1 (Macro): %.4f | F1 (Weighted): %.4f",
+        "Evaluation Results -> Log Loss: %.4f | Accuracy: %.4f | "
+        "F1 (Macro): %.4f | F1 (Weighted): %.4f",
         metrics["log_loss"],
         metrics["accuracy"],
+        metrics["balanced_accuracy"],
         metrics["f1_macro"],
         metrics["f1_weighted"],
     )
     return metrics
+
+def per_class_report(
+    model, X_test: pd.DataFrame, y_test: pd.Series
+) -> dict[str, dict[str, float]]:
+    """Compute precision, recall, F1 and support for every class separately.
+
+     On an imbalanced problem the aggregate scores hide the classes that matter most, 
+    and a rare outcome can be missed entirely without any of them moving much.
+
+    Parameters
+    ----------
+    model : Any
+        Trained model or pipeline implementing predict.
+    X_test : pd.DataFrame
+        Test features matrix.
+    y_test : pd.Series
+        True target labels.
+
+    Returns
+    -------
+    dict[str, dict[str, float]]
+        One entry per class the model was trained on, each mapping
+        'precision', 'recall', 'f1' and 'support' to their values. The
+        aggregate rows scikit-learn adds are dropped, evaluate_model already
+        covering them.
+    """
+    y_pred = model.predict(X_test)
+
+    # labels=model.classes_ keeps a class the model knows in the report even
+    # when the test split happens to hold none of it, which for the rarest
+    # outcomes is a real possibility. zero_division=0 is what such a class
+    # scores, rather than a warning and a nan.
+    report = classification_report(
+        y_test,
+        y_pred,
+        labels=model.classes_,
+        output_dict=True,
+        zero_division=0,
+    )
+
+    # classification_report mixes per-class dicts with aggregate rows
+    # ('accuracy', 'macro avg', 'weighted avg'); only the former are wanted.
+    return {
+        str(label): {
+            "precision": float(report[str(label)]["precision"]),
+            "recall": float(report[str(label)]["recall"]),
+            "f1": float(report[str(label)]["f1-score"]),
+            "support": float(report[str(label)]["support"]),
+        }
+        for label in model.classes_
+    }
 
 def load_test_data(
     test_features_path: Path, test_target_path: Path
@@ -173,7 +256,7 @@ def main(
     X_test, y_test = load_test_data(test_features_path, test_target_path)
     X_test, y_test = drop_rows_missing_required(X_test, y_test)
 
-    all_metrics: dict[str, dict[str, float]] = {}
+    all_metrics: dict[str, SpeciesReport] = {}
     for species in config.SPECIES:
         mask = X_test[config.SPECIES_COL] == species
         if not mask.any():
@@ -191,7 +274,10 @@ def main(
             species, len(X_species), species_model_path)
         model = joblib.load(species_model_path)
 
-        all_metrics[species.lower()] = evaluate_model(model, X_species, y_species)
+        all_metrics[species.lower()] = {
+            "overall": evaluate_model(model, X_species, y_species),
+            "per_class": per_class_report(model, X_species, y_species),
+        }
 
     if not all_metrics:
         raise ValueError(
