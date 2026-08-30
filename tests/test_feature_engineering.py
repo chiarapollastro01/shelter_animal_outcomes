@@ -20,6 +20,7 @@ from src.feature_engineering import (
     TemporalFeaturesExtractor,
     extract_primary_breed,
     extract_primary_color,
+    require_columns
 )
 
 
@@ -122,6 +123,64 @@ def test_extractors_support_custom_column_names(
 
     assert custom_col not in X_transformed.columns
     assert expected_col in X_transformed.columns
+
+
+# =====================================================================
+#                       REQUIRE COLUMNS TESTS 
+# =====================================================================
+
+class TestRequireColumns:
+    """Testing the guard every transformer calls before touching a frame."""
+
+    def test_all_columns_present_returns_none(self):
+        """Verify that a satisfied requirement is silent.
+
+        GIVEN: a DataFrame carrying every required column
+        WHEN: require_columns is executed
+        THEN: nothing is raised and nothing is returned, the guard being there
+              only to interrupt
+        """
+        X = pd.DataFrame({"a": [1], "b": [2]})
+
+        assert require_columns(X, ("a", "b"), "nothing works") is None
+
+
+    def test_every_missing_column_is_listed(self):
+        """Verify that the message names all the culprits, not just the first.
+
+        GIVEN: a DataFrame missing two of the three required columns
+        WHEN: require_columns is executed
+        THEN: both missing names appear in the message, so that a caller fixes
+              the frame once instead of discovering the columns one at a time
+        """
+        X = pd.DataFrame({"a": [1]})
+
+        with pytest.raises(ValueError) as excinfo:
+            require_columns(X, ("a", "b", "c"), "the frequent categories cannot be learned")
+
+        message = str(excinfo.value)
+        assert "b" in message
+        assert "c" in message
+
+    def test_the_message_reads_the_same_whatever_the_count(self):
+        """Verify that the wording does not assume a single missing column.
+
+        GIVEN: one frame missing a single column and one missing two
+        WHEN: require_columns is executed on both
+        THEN: neither message contains a pronoun agreeing with a count, the
+              reason being appended after a colon in both cases
+        """
+        X = pd.DataFrame({"a": [1]})
+        reason = "nothing works"
+
+        with pytest.raises(ValueError) as one:
+            require_columns(X, ("b",), reason)
+        with pytest.raises(ValueError) as two:
+            require_columns(X, ("b", "c"), reason)
+
+        assert str(one.value).endswith(f": {reason}.")
+        assert str(two.value).endswith(f": {reason}.")
+
 
 # =====================================================================
 #                       TEMPORAL FEATURE TESTS (Stateless)
@@ -906,7 +965,7 @@ class TestRareCategoriesGrouperFit:
             grouper.fit(X_train)
 
         assert "is empty or contains only NaNs" in caplog.text
-        assert grouper.frequent_categories_[config.BREED_COL] == ()
+        assert grouper.frequent_categories_ == {config.BREED_COL: ()}
 
     def test_rare_categories_grouper_fit_empty_dataframe(self):
         """Verify that a frame with no rows is fitted without crashing.
@@ -1192,6 +1251,7 @@ class TestCategoricalFeaturesEngineerFit:
             engineer.fit(X_train)
 
         assert "is empty or contains only NaNs" in caplog.text
+        assert engineer.grouper_ is not None
         assert engineer.grouper_.frequent_categories_ == {
             config.BREED_COL: (),
             config.COLOR_COL: (),
