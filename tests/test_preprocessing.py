@@ -1,16 +1,24 @@
 """
 Unit tests for the preprocessing module.
 """
-import logging
+
 import numpy as np
-from sklearn.exceptions import NotFittedError
-import pytest
 import pandas as pd
+import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from sklearn.exceptions import NotFittedError
+
 from src import config
-from src.preprocessing import drop_rows_missing_required, extract_age_in_days, DataCleaner
+from src.preprocessing import (
+    DataCleaner,
+    drop_rows_missing_required, 
+    extract_age_in_days, 
+    DAYS_PER_UNIT
+)
 
 # =====================================================================
-#                              FIXTURES 
+#                              FIXTURES
 # =====================================================================
 
 @pytest.fixture
@@ -23,7 +31,12 @@ def train_X() -> pd.DataFrame:
     return pd.DataFrame(
         {
             config.ID_COL: ["A1", "A2", "A3", "A4"],
-            config.DATETIME_COL: ["2026-01-01 10:00:00", "2026-01-02 11:00:00", "2026-01-03 12:00:00", "2026-01-04 13:00:00"],
+            config.DATETIME_COL: [
+                "2026-01-01 10:00:00",
+                "2026-01-02 11:00:00",
+                "2026-01-03 12:00:00",
+                "2026-01-04 13:00:00",
+            ],
             config.NAME_COL: ["Bella", np.nan, "Luna", "Max"],
             config.BREED_COL: ["Chihuahua Mix", np.nan, "Beagle", "Beagle"],
             config.COLOR_COL: [np.nan, "Black", "White", "Black"],
@@ -66,50 +79,58 @@ def rows_with_defects() -> tuple[pd.DataFrame, pd.Series]:
     )
     return X, y
 
-# =====================================================================
-#                      AGE EXTRACTION TESTS
-# =====================================================================
+
 class TestExtractAgeInDays:
+    """Testing the parsing of textual age strings into a numeric count of days."""
+
     def test_extract_age_typical_cases(self):
         """ Verify parsing of well-formatted textual age strings into float days.
 
-        GIVEN: a pandas Series with well-formatted, lowercase age strings (years, months, weeks, days) with custom indices
+        GIVEN: a pandas Series with well-formatted, lowercase age strings (years, months, weeks,
+               days) with custom indices
         WHEN: extract_age_in_days is executed
         THEN: the numeric values are correctly converted to float days and the index is preserved
         """
-        age_series = pd.Series(["1 year", "2 months", "3 weeks", "5 days"], index=[101, 102, 103, 104])
-    
+        age_series = pd.Series(
+            ["1 year", "2 months", "3 weeks", "5 days"], index=[101, 102, 103, 104]
+        )
+
         expected = pd.Series([365.0, 60.0, 21.0, 5.0], index=[101, 102, 103, 104])
-    
+
         result = extract_age_in_days(age_series)
 
         pd.testing.assert_series_equal(result, expected, check_names=False)
-  
+
 
     def test_extract_age_formatting_variations(self):
         """ Verify parsing validity with case variations and surrounding spaces.
 
-        GIVEN: a Series with uppercase units, singular terms, and leading/trailing spaces with custom indices
+        GIVEN: a Series with uppercase units, singular terms, and leading/trailing spaces with
+               custom indices
         WHEN: extract_age_in_days is executed
         THEN: values are parsed correctly, ignoring case and spacing, preserving the index
         """
-        age_series = pd.Series(["1 YEAR", "  2 months  ", "1 day", "10 DAYS"], index=[10, 20, 30, 40])
+        age_series = pd.Series(
+            ["1 YEAR", "  2 months  ", "1 day", "10 DAYS"], index=[10, 20, 30, 40]
+        )
 
         expected = pd.Series([365.0, 60.0, 1.0, 10.0], index=[10, 20, 30, 40])
-    
+
         result = extract_age_in_days(age_series)
-    
+
         pd.testing.assert_series_equal(result, expected, check_names=False)
 
     def test_extract_age_decimal_and_float_values(self):
         """ Verify parsing of decimal/float numbers in textual age strings.
 
-        GIVEN: a pandas Series containing age strings with float numbers (e.g., '1.5 years', '0.5 months') with custom indices
+        GIVEN: a pandas Series containing age strings with float numbers (e.g., '1.5 years', '0.5
+               months') with custom indices
         WHEN: extract_age_in_days is executed
-        THEN: decimal numbers are extracted correctly and multiplied by unit factors, preserving the float index
+        THEN: decimal numbers are extracted correctly and multiplied by unit factors, preserving the
+              float index
         """
         age_series = pd.Series(
-            ["1.5 years", "0.5 months", "2.5 weeks", "0.5 days"], 
+            ["1.5 years", "0.5 months", "2.5 weeks", "0.5 days"],
             index=[10, 20, 30, 40]
         )
 
@@ -122,12 +143,14 @@ class TestExtractAgeInDays:
     def test_extract_age_word_boundaries(self):
         """ Verify that partial word matches containing unit substrings are ignored.
 
-        GIVEN: a pandas Series containing compound words with unit substrings (e.g., 'weekday', 'midweek') with custom indices
+        GIVEN: a pandas Series containing compound words with unit substrings (e.g., 'weekday',
+               'midweek') with custom indices
         WHEN: extract_age_in_days is executed
-        THEN: compound words safely resolve to NaN without triggering unit multipliers, preserving the index
+        THEN: compound words safely resolve to NaN without triggering unit multipliers, preserving
+              the index
         """
         age_series = pd.Series(
-            ["1 weekday", "5 workdays", "2 midweeks", "1 day"], 
+            ["1 weekday", "5 workdays", "2 midweeks", "1 day"],
             index=[100, 200, 300, 400]
         )
 
@@ -142,7 +165,8 @@ class TestExtractAgeInDays:
 
         GIVEN: a Series containing a valid age string ('2 years') and a missing value (NaN)
         WHEN: extract_age_in_days is executed
-        THEN: the valid string is correctly converted to float days (730.0) and the NaN remains NaN, preserving index
+        THEN: the valid string is correctly converted to float days (730.0) and the NaN remains NaN,
+              preserving index
         """
         age_series = pd.Series(["2 years", np.nan], index=[10, 20])
         expected = pd.Series([730.0, np.nan], index=[10, 20])
@@ -156,15 +180,16 @@ class TestExtractAgeInDays:
 
         """ Verify safe fallback to NaN when encountering invalid cases.
 
-        GIVEN: a Series containing an unparseable string ("Unknown") and a number with an invalid unit
+        GIVEN: a Series containing an unparseable string ("Unknown") and a number with an invalid
+               unit
         WHEN: the extract_age_in_days function is executed
         THEN: all inputs safely resolve to NaN without breaking the execution, preserving the index
         """
         age_series = pd.Series(["Unknown", "5 units"], index=[8,9])
         expected = pd.Series([np.nan, np.nan], index=[8,9])
-    
+
         result = extract_age_in_days(age_series)
-    
+
         pd.testing.assert_series_equal(result, expected, check_names=False)
 
 
@@ -173,34 +198,69 @@ class TestExtractAgeInDays:
 
         GIVEN: a Series where all elements are NaN with custom indeces (early-return branch)
         WHEN: extract_age_in_days is executed
-        THEN: it returns a Series of the same length containing NaN with a float dtype, preserving the index
+        THEN: it returns a Series of the same length containing NaN with a float dtype, preserving
+              the index
         """
         age_series = pd.Series([np.nan, np.nan], index=[10, 20])
         expected = pd.Series([np.nan, np.nan], index=[10, 20], dtype=float)
-    
+
         result = extract_age_in_days(age_series)
-    
+
         pd.testing.assert_series_equal(result, expected, check_names=False)
 
     def test_extract_age_empty_series(self):
         """ Verify behavior when processing an empty pandas Series.
 
-        GIVEN: a completely empty pandas Series (length 0) 
+        GIVEN: a completely empty pandas Series (length 0)
         WHEN: extract_age_in_days is executed
-        THEN: an empty Series is returned immediately, preserving the empty structure and float dtype
+        THEN: an empty Series is returned immediately, preserving the empty structure and float
+              dtype
         """
 
         empty_series = pd.Series([], dtype=object)
         expected = pd.Series([], dtype=float)
-    
+
         result = extract_age_in_days(empty_series)
-    
+
         assert result.empty
         pd.testing.assert_series_equal(result, expected, check_names=False)
 
-# =====================================================================
-#                 drop_rows_missing_critical TESTS
-# =====================================================================
+    @given(
+        amount=st.integers(min_value=0, max_value=10_000),
+        unit=st.sampled_from(sorted(DAYS_PER_UNIT)),
+        plural=st.booleans(),
+    )
+    def test_a_formatted_age_parses_back_to_its_own_value(self, amount, unit, plural):
+        """Verify the round trip from a written age to a number of days.
+
+        GIVEN: any whole amount and any unit the parser declares in DAYS_PER_UNIT
+        WHEN: the pair is written the way the dataset writes it and parsed back
+        THEN: the result equals the amount times the days that unit is worth, for
+              every unit and either spelling
+        """
+        written = f"{amount} {unit}s" if plural else f"{amount} {unit}"
+
+        parsed = extract_age_in_days(pd.Series([written]))
+
+        assert parsed.iloc[0] == amount * DAYS_PER_UNIT[unit]
+
+    @given(
+        text=st.text(
+            alphabet=st.characters(whitelist_categories=("Lu", "Ll", "Zs")),
+            max_size=20,
+        ).filter(lambda s: not any(u in s.lower() for u in DAYS_PER_UNIT))
+    )
+    def test_a_string_without_a_known_unit_is_not_parsed(self, text):
+        """Verify that anything lacking a unit becomes NaN rather than a number.
+
+        GIVEN: any letters-and-spaces string naming none of the known units
+        WHEN: it is handed to the parser
+        THEN: the result is NaN
+        """
+        parsed = extract_age_in_days(pd.Series([text]))
+
+        assert np.isnan(parsed.iloc[0])
+
 
 class TestDropRowsMissingRequired:
     """Testing the row-level filter that runs before the pipeline."""
@@ -269,7 +329,7 @@ class TestDropRowsMissingRequired:
 
         GIVEN: a frame that does not carry one of the required columns
         WHEN: drop_rows_missing_required is executed
-        THEN: a KeyError is raised, since the function cannot check 
+        THEN: a KeyError is raised, since the function cannot check
               for missing values in a column that is not present
         """
         X, y = rows_with_defects
@@ -278,7 +338,7 @@ class TestDropRowsMissingRequired:
             drop_rows_missing_required(X.drop(columns=[config.SPECIES_COL]), y)
 
     def test_all_defective_rows_returns_empty_structures(self):
-        """Verify that a frame where every row is unusable returns empty outputs 
+        """Verify that a frame where every row is unusable returns empty outputs
         with the same columns as the input.
 
         GIVEN: a frame where every row is missing a required value
@@ -307,7 +367,7 @@ class TestDropRowsMissingRequired:
         THEN: the row with the missing timestamp is dropped
         """
         X, y = rows_with_defects
-        
+
         X_clean, y_clean = drop_rows_missing_required(
             X, y, row_required_cols=(config.DATETIME_COL,)
         )
@@ -315,15 +375,12 @@ class TestDropRowsMissingRequired:
         assert len(X_clean) == 3
         assert len(y_clean) == 3
 
-# =====================================================================
-#                       DATA CLEANER TESTS
-# =====================================================================
-# -----------------------TEST FIT------------------------------------------------------------------
 class TestDataCleanerFit:
-  
+    """Testing the statistics DataCleaner learns from the training frame."""
+
     def test_datacleaner_returns_self(self, train_X):
         """ Verify that DataCleaner.fit returns the fitted transformer instance.
-    
+
         GIVEN: an unfitted DataCleaner
         WHEN: fit is executed
         THEN: the same instance is returned
@@ -449,11 +506,13 @@ class TestDataCleanerTransform:
         )
 
     def test_datacleaner_age_log_transformation(self, fitted_cleaner):
-        """Verify log1p transformation accuracy on complete, non-null age inputs using fitted_cleaner.
+        """Verify log1p transformation accuracy on complete, non-null age inputs using
+           fitted_cleaner.
 
         GIVEN: a fitted cleaner and a DataFrame with valid age entries ('0 days', '7 days')
         WHEN: transform is executed
-        THEN: config.LOG_AGE_COL contains mathematically correct log1p values and age column is dropped
+        THEN: config.LOG_AGE_COL contains mathematically correct log1p values and age column is
+              dropped
         """
         X_mock = pd.DataFrame({config.AGE_COL: ["0 days", "7 days"]}, index=[10, 20])
 
@@ -482,7 +541,9 @@ class TestDataCleanerTransform:
         X_clean = cleaner.transform(X_test)
 
         expected = pd.Series([np.log1p(365.0), np.log1p(730.0)], name=config.LOG_AGE_COL)
-        pd.testing.assert_series_equal(X_clean[config.LOG_AGE_COL], expected, check_exact=False, atol=1e-7)
+        pd.testing.assert_series_equal(
+            X_clean[config.LOG_AGE_COL], expected, check_exact=False, atol=1e-7
+        )
 
     def test_datacleaner_breed_color_preventive_imputation(self, fitted_cleaner, train_X):
         """ Verify preventive imputation of missing Breed and Color values with 'Unknown'.
@@ -490,7 +551,7 @@ class TestDataCleanerTransform:
         GIVEN: a DataFrame containing missing values (NaN) in both breed and color columns
         WHEN: transform is executed
         THEN: all missing values (NaN) in both columns are successfully replaced with "Unknown"
-              
+
         """
         X_clean = fitted_cleaner.transform(train_X)
 
@@ -518,7 +579,7 @@ class TestDataCleanerTransform:
 
         GIVEN: a fitted cleaner and an input DataFrame
         WHEN: transform is executed
-        THEN: the input frame is unchanged 
+        THEN: the input frame is unchanged
         """
         original = train_X.copy(deep=True)
 
@@ -527,8 +588,9 @@ class TestDataCleanerTransform:
         pd.testing.assert_frame_equal(train_X, original)
 
 
-#----------------------------------------END TO END, CUSTOM & EDGE CASES------------------------------------------------------
 class TestDataCleanerCustomAndE2E:
+    """Testing DataCleaner end to end on degenerate all-missing and empty frames."""
+
     def test_datacleaner_all_nan(self):
         """ Verify robust handling of a DataFrame composed entirely of missing entries.
 
@@ -549,7 +611,7 @@ class TestDataCleanerCustomAndE2E:
             {
                 config.NAME_COL: ["Unknown", "Unknown"],
                 config.SEX_COL: ["Unknown", "Unknown"],
-                config.LOG_AGE_COL: [0.0, 0.0], 
+                config.LOG_AGE_COL: [0.0, 0.0],
             },
             index=[100, 200],
         )
@@ -581,10 +643,12 @@ class TestDataCleanerCustomAndE2E:
     def test_datacleaner_prevents_data_leakage(self, train_X):
         """ Verify that test set imputation uses learned statistics from training data.
 
-        GIVEN: a training DataFrame with specific median age (2 years = 730 days) and sex mode (Neutered Male)
+        GIVEN: a training DataFrame with specific median age (2 years = 730 days) and sex mode
+               (Neutered Male)
                and a test DataFrame with missing values
         WHEN: fit is called on train, and transform is called on test
-        THEN: the test DataFrame is imputed using train statistics, completely preventing data leakage
+        THEN: the test DataFrame is imputed using train statistics, completely preventing data
+              leakage
         """
 
         X_test = pd.DataFrame(
@@ -604,13 +668,13 @@ class TestDataCleanerCustomAndE2E:
 
         GIVEN: a DataCleaner initialised with a custom list
         WHEN: fit and transform are executed
-        THEN: only the requested columns are dropped 
+        THEN: only the requested columns are dropped
         """
         cleaner = DataCleaner(columns_to_remove=(config.NAME_COL,))
         X_clean = cleaner.fit_transform(train_X)
 
         assert config.NAME_COL not in X_clean.columns
-        assert config.ID_COL in X_clean.columns 
+        assert config.ID_COL in X_clean.columns
 
 
     def test_datacleaner_custom_fill_targets(self):
@@ -618,7 +682,7 @@ class TestDataCleanerCustomAndE2E:
 
         GIVEN: a DataFrame with missing values in custom categorical columns
         WHEN: DataCleaner is initialized with custom fill_targets tuple
-        THEN: missing values in specified columns are filled with 'Unknown', 
+        THEN: missing values in specified columns are filled with 'Unknown',
               while untouched columns retain their original NaNs
         """
         X_mock = pd.DataFrame(
@@ -644,7 +708,8 @@ class TestDataCleanerCustomAndE2E:
         """Verify processing when using custom sex and age column names.
 
         GIVEN: a DataFrame with custom column names ('animal_sex', 'animal_age')
-        WHEN: DataCleaner initialized with sex_col='animal_sex' and age_col='animal_age' executes fit and transform
+        WHEN: DataCleaner initialized with sex_col='animal_sex' and age_col='animal_age' executes
+              fit and transform
         THEN: custom columns are processed correctly and config.LOG_AGE_COL is generated
         """
         X_mock = pd.DataFrame(
@@ -658,6 +723,3 @@ class TestDataCleanerCustomAndE2E:
         assert config.LOG_AGE_COL in X_clean.columns
         assert "animal_age" not in X_clean.columns
         assert X_clean["animal_sex"].isnull().sum() == 0
-
-
-

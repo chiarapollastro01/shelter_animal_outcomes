@@ -9,6 +9,8 @@ import logging
 import numpy as np
 import pandas as pd
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from sklearn.exceptions import NotFittedError
 
 from src import config
@@ -1181,6 +1183,7 @@ class TestRareCategoriesGrouperCustomAndE2E:
             (0.50, {"A"}),
         ],
     )
+
     def test_rare_categories_grouper_custom_max_other_ratio(
         self, max_ratio, expected_frequent
     ):
@@ -1203,6 +1206,58 @@ class TestRareCategoriesGrouperCustomAndE2E:
 
         assert set(grouper.frequent_categories_[config.BREED_COL]) == expected_frequent
         assert set(grouper.frequent_categories_[config.COLOR_COL]) == {"Black"}
+
+
+    @given(
+        counts=st.lists(st.integers(min_value=1, max_value=50), min_size=1, max_size=8),
+        max_other_ratio=st.floats(min_value=0.05, max_value=0.5),
+    )
+
+    @settings(max_examples=50, deadline=None)
+    def test_the_other_bucket_never_exceeds_its_declared_ceiling(
+        self, counts, max_other_ratio
+    ):
+        """Verify on the training frame the ceiling the class documents.
+
+        GIVEN: any set of categories with any frequencies and any allowed ratio
+        WHEN: the grouper is fitted and applied to the frame it learned from
+        THEN: the share of rows collapsed into 'Other' stays at or below the
+              ratio
+        """
+        labels = [f"cat_{i}" for i, n in enumerate(counts) for _ in range(n)]
+        X = pd.DataFrame({config.BREED_COL: labels})
+
+        grouper = RareCategoriesGrouper(
+            columns=(config.BREED_COL,), max_other_ratio=max_other_ratio
+        )
+        grouped = grouper.fit(X).transform(X)
+
+        other_share = (grouped[config.BREED_COL] == "Other").mean()
+        assert other_share <= max_other_ratio + 1e-9
+
+    @given(
+        counts=st.lists(st.integers(min_value=1, max_value=50), min_size=1, max_size=8),
+        max_other_ratio=st.floats(min_value=0.05, max_value=0.5),
+    )
+    @settings(max_examples=50, deadline=None)
+    def test_grouping_twice_changes_nothing(self, counts, max_other_ratio):
+        """Verify that the grouper is idempotent.
+
+        GIVEN: any fitted grouper and the frame it was fitted on
+        WHEN: transform is applied to its own output
+        THEN: the second pass leaves the frame untouched, 'Other' not being
+              treated as a rare category to collapse again
+        """
+        labels = [f"cat_{i}" for i, n in enumerate(counts) for _ in range(n)]
+        X = pd.DataFrame({config.BREED_COL: labels})
+
+        grouper = RareCategoriesGrouper(
+            columns=(config.BREED_COL,), max_other_ratio=max_other_ratio
+        )
+        once = grouper.fit(X).transform(X)
+        twice = grouper.transform(once)
+
+        pd.testing.assert_frame_equal(once, twice)
 
 
 # =====================================================================
