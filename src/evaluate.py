@@ -152,14 +152,14 @@ def evaluate_model(
     }
 
     logger.info(
-        "Evaluation Results -> Log Loss: %.4f | Accuracy: %.4f | "
-        "F1 (Macro): %.4f | F1 (Weighted): %.4f",
-        metrics["log_loss"],
-        metrics["accuracy"],
-        metrics["balanced_accuracy"],
-        metrics["f1_macro"],
-        metrics["f1_weighted"],
-    )
+    "Evaluation Results -> Log Loss: %.4f | Accuracy: %.4f | "
+    "Balanced Acc: %.4f | F1 (Macro): %.4f | F1 (Weighted): %.4f",
+    metrics["log_loss"],
+    metrics["accuracy"],
+    metrics["balanced_accuracy"],
+    metrics["f1_macro"],
+    metrics["f1_weighted"],
+)
     return metrics
 
 def per_class_report(
