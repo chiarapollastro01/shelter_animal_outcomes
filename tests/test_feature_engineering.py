@@ -425,7 +425,7 @@ class TestTemporalFeaturesExtractor:
         assert np.isnan(X_transformed[config.WDAY_COS_COL].loc[102])
         assert np.isnan(X_transformed[config.DOY_SIN_COL].loc[102])
 
-        assert X_transformed[config.IS_WEEKEND_COL].loc[101] == 1.0
+        assert X_transformed[config.IS_WEEKEND_COL].loc[101] == pytest.approx(1.0)
         assert np.isnan(X_transformed[config.IS_WEEKEND_COL].loc[102])
 
 
@@ -1537,7 +1537,7 @@ class TestCategoricalFeaturesEngineerCustomAndE2E:
 
         engineer = CategoricalFeaturesEngineer(max_other_ratio=0.5).fit(X_train)
 
-        assert engineer.grouper_.max_other_ratio == 0.5
+        assert engineer.grouper_.max_other_ratio == pytest.approx(0.5)
         assert engineer.grouper_.frequent_categories_[config.BREED_COL] == ("Labrador",)
         assert engineer.grouper_.frequent_categories_[config.COLOR_COL] == ("Black",)
 

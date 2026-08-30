@@ -103,8 +103,7 @@ class TestDataPreparation:
             X_eda.columns
         )
         assert X_eda[eda.WEEKDAY_NAME_COL].cat.ordered
-        assert X_eda.loc[0, eda.AGE_IN_DAYS_COL] == 365.0
-
+        assert X_eda.loc[0, eda.AGE_IN_DAYS_COL] == pytest.approx(365.0)
 
     def test_add_eda_features_weekday_categorical_order(self, raw_X):
         """Verify exact order and categories of derived Weekday_Name feature.
@@ -289,7 +288,7 @@ class TestDataPreparation:
         ct = compute_outcome_crosstab(X, "f")
 
         assert not ct.isna().any().any()
-        assert ct.loc["c"].sum() == 0.0
+        assert ct.loc["c"].sum() == pytest.approx(0.0)
 
     def test_percentiles_without_the_age_column_raise(self):
         """Verify that asking for percentiles before enrichment is an error.

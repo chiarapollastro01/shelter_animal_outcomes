@@ -334,14 +334,15 @@ class TestDataCleanerFit:
     def test_datacleaner_learns_correct_statistics(self, train_X):
         """Verify that fit learns exact mode for sex ('Neutered Male') and median age (730.0 days).
 
-        GIVEN: a training DataFrame with known sex mode ('Neutered Male') and median age (730.0 days)
+        GIVEN: a training DataFrame with known sex mode ('Neutered Male') and median age (730.0
+               days)
         WHEN: fit is executed
         THEN: sex_mode_ is set to 'Neutered Male' and age_median_ is set to 730.0
         """
-    
+
         cleaner = DataCleaner().fit(train_X)
         assert cleaner.sex_mode_ == "Neutered Male"
-        assert cleaner.age_median_ == 730.0
+        assert cleaner.age_median_ == pytest.approx(730.0)
 
     def test_datacleaner_handles_all_nan_columns(self):
         """Verify fallback statistics learned when columns contain only NaN values.
@@ -354,27 +355,26 @@ class TestDataCleanerFit:
         cleaner = DataCleaner().fit(X_mock)
 
         assert cleaner.sex_mode_ == "Unknown"
-        assert cleaner.age_median_ == 0.0
+        assert cleaner.age_median_ == pytest.approx(0.0)
 
     def test_datacleaner_without_sex_and_age_columns(self):
         """ Verify fallback statistics learned when sex and age columns are absent during fit.
 
         GIVEN: a DataFrame without sex and age columns
         WHEN: fit is executed
-        THEN: safe fallbacks are learned ('Unknown', 0.0) 
+        THEN: safe fallbacks are learned ('Unknown', 0.0)
         """
         X_mock = pd.DataFrame({config.BREED_COL: ["Beagle"], config.COLOR_COL: ["Black"]})
 
         cleaner = DataCleaner().fit(X_mock)
 
         assert cleaner.sex_mode_ == "Unknown"
-        assert cleaner.age_median_ == 0.0
+        assert cleaner.age_median_ == pytest.approx(0.0)
 
-
-#-------------------------------TEST TRANSFORM--------------------------------------------
 
 class TestDataCleanerTransform:
-     
+    """Testing the cleaning and imputation DataCleaner applies once fitted."""
+
     def test_datacleaner_transform_raises_not_fitted_error_if_unfitted(self):
         """ Verify that transform refuses to run before fit.
 
@@ -427,7 +427,7 @@ class TestDataCleanerTransform:
         X_clean = fitted_cleaner.transform(train_X)
 
         assert X_clean.loc[40, config.SEX_COL] == "Neutered Male"
-   
+
 
     def test_datacleaner_age_imputation(self, fitted_cleaner, train_X):
         """ Verify missing age imputation with the fitted median followed by log1p transformation.
@@ -563,15 +563,16 @@ class TestDataCleanerCustomAndE2E:
 
         GIVEN: an empty DataFrame with valid column headers
         WHEN: fit and transform are executed
-        THEN: the output DataFrame is empty, schema is preserved, and default fallback states are learned
+        THEN: the output DataFrame is empty, schema is preserved, and default fallback states are
+              learned
         """
         X_mock = pd.DataFrame(columns=(config.NAME_COL, config.SEX_COL, config.AGE_COL))
-    
+
         cleaner = DataCleaner().fit(X_mock)
         X_clean=cleaner.transform(X_mock)
 
         assert cleaner.sex_mode_ == "Unknown"
-        assert cleaner.age_median_ == 0.0    
+        assert cleaner.age_median_ == pytest.approx(0.0)
         assert X_clean.empty
         assert config.LOG_AGE_COL in X_clean.columns
         assert config.AGE_COL not in X_clean.columns
