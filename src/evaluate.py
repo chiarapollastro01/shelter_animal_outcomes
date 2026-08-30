@@ -52,9 +52,10 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import TypedDict
+from typing import TypedDict, Protocol
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
@@ -68,6 +69,27 @@ from src import config
 from src.preprocessing import drop_rows_missing_required
 
 logger = logging.getLogger(__name__)
+
+class ProbabilisticClassifier(Protocol):
+    """Structural interface for estimators providing label 
+       and probability predictions. Using a Protocol enables 
+       structural subtyping without inheritance, cleanly accepting
+       both imblearn pipelines and standard scikit-learn models while 
+       excluding incompatible transformers.
+
+    Attributes
+    ----------
+    classes_ : np.ndarray
+        The labels seen during fit, in the column order of predict_proba.
+    """
+
+    classes_: np.ndarray
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Return one predicted label per row of X."""
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Return one probability per class per row of X."""
 
 class SpeciesReport(TypedDict):
     """The evaluation block written for one species.
@@ -87,12 +109,14 @@ class SpeciesReport(TypedDict):
     overall: dict[str, float]
     per_class: dict[str, dict[str, float]]
 
-def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, float]:
+def evaluate_model(
+    model: ProbabilisticClassifier, X_test: pd.DataFrame, y_test: pd.Series
+) -> dict[str, float]:
     """Compute key evaluation metrics on the test dataset.
 
     Parameters
     ----------
-    model : Any
+    model : ProbabilisticClassifier
         Trained best model or pipeline implementing predict and predict_proba.
     X_test : pd.DataFrame
         Test features matrix.
@@ -139,7 +163,7 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, 
     return metrics
 
 def per_class_report(
-    model, X_test: pd.DataFrame, y_test: pd.Series
+    model: ProbabilisticClassifier, X_test: pd.DataFrame, y_test: pd.Series
 ) -> dict[str, dict[str, float]]:
     """Compute precision, recall, F1 and support for every class separately.
 
@@ -148,7 +172,7 @@ def per_class_report(
 
     Parameters
     ----------
-    model : Any
+    model : ProbabilisticClassifier
         Trained model or pipeline implementing predict.
     X_test : pd.DataFrame
         Test features matrix.
