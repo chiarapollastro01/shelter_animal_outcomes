@@ -1,5 +1,6 @@
-"Testing suite for the EDA module"
+"Testing suite for the EDA module (src/eda.py)"
 import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -51,6 +52,7 @@ def close_figures():
 
 
 class TestDataPreparation:
+    """Testing the functions deriving EDA features and summary tables from the raw frame."""
 
     def test_only_the_columns_with_gaps_are_reported(self, raw_X):
         """Verify that complete columns are left out of the result.
@@ -79,7 +81,6 @@ class TestDataPreparation:
 
         assert list(missing.values) == sorted(missing.values, reverse=True)
 
-
     def test_compute_missing_values_empty_when_complete(self, raw_X):
         """Verify that an empty Series is returned when no missing values exist.
 
@@ -88,7 +89,6 @@ class TestDataPreparation:
         THEN: an empty pandas Series is returned
         """
         assert compute_missing_values(raw_X.dropna(axis=1)).empty
-
 
     def test_add_eda_features_creates_columns(self, raw_X):
         """Verify that add_eda_features correctly derives all temporal and age columns.
@@ -117,7 +117,6 @@ class TestDataPreparation:
         categories = list(X_eda[eda.WEEKDAY_NAME_COL].cat.categories)
         assert categories == ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-
     def test_add_eda_features_does_not_mutate_input(self, raw_X):
         """Verify that add_eda_features preserves input DataFrame purity.
 
@@ -130,7 +129,6 @@ class TestDataPreparation:
         add_eda_features(raw_X)
 
         pd.testing.assert_frame_equal(raw_X, original)
-
 
     def test_an_unparsable_timestamp_becomes_missing(self, raw_X, caplog):
         """Verify that a bad timestamp does not stop the analysis.
@@ -197,7 +195,8 @@ class TestDataPreparation:
     def test_split_by_species_ignores_unknown_species(self, raw_X):
         """Verify that split_by_species filters out animal types not present in config.SPECIES.
 
-        GIVEN: a DataFrame containing standard species ('Dog', 'Cat') and an unknown species ('Bird')
+        GIVEN: a DataFrame containing standard species ('Dog', 'Cat') and an unknown species
+               ('Bird')
         WHEN: split_by_species is executed
         THEN: 'Bird' is ignored and only 'Dog' and 'Cat' are returned in the dictionary
         """
@@ -225,7 +224,8 @@ class TestDataPreparation:
 
         GIVEN: a DataFrame with species and outcome columns
         WHEN: compute_outcome_crosstab is executed with 'columns', 'all', and None normalization
-        THEN: columns sum to 1.0, total matrix sums to 1.0, and raw integer counts are returned respectively
+        THEN: columns sum to 1.0, total matrix sums to 1.0, and raw integer counts are returned
+              respectively
         """
         ct_cols = compute_outcome_crosstab(raw_X, config.SPECIES_COL, normalize="columns")
         ct_all = compute_outcome_crosstab(raw_X, config.SPECIES_COL, normalize="all")
@@ -233,7 +233,9 @@ class TestDataPreparation:
 
         assert np.allclose(ct_cols.sum(axis=0), 1.0)
         assert np.isclose(ct_all.values.sum(), 1.0)
-        assert ct_raw.values.sum() == len(raw_X.dropna(subset=[config.SPECIES_COL, config.TARGET_COL]))
+        assert ct_raw.values.sum() == len(
+            raw_X.dropna(subset=[config.SPECIES_COL, config.TARGET_COL])
+        )
 
     def test_an_unknown_normalize_strategy_raises(self, raw_X):
         """Verify that a misspelt strategy is refused rather than ignored.
@@ -247,7 +249,8 @@ class TestDataPreparation:
             compute_outcome_crosstab(raw_X, config.SPECIES_COL, normalize="rows")
 
     def test_compute_outcome_crosstab_single_outcome_value(self, raw_X):
-        """Verify compute_outcome_crosstab handles case when target variable has only 1 unique class.
+        """Verify compute_outcome_crosstab handles case when target variable has only 1 unique
+           class.
 
         GIVEN: a DataFrame where all rows have the same OutcomeType ('Adoption')
         WHEN: compute_outcome_crosstab is executed
@@ -301,7 +304,6 @@ class TestDataPreparation:
         with pytest.raises(KeyError, match=eda.AGE_IN_DAYS_COL):
             compute_age_percentiles(pd.DataFrame({"x": [1, 2]}))
 
-
     def test_compute_age_percentiles(self, raw_X):
         """Verify reference percentiles for age in days are monotonic and exclude NaNs.
 
@@ -316,7 +318,6 @@ class TestDataPreparation:
         assert list(percentiles.index) == list(eda.AGE_PERCENTILES)
         assert not percentiles.isnull().any()
         assert percentiles.is_monotonic_increasing
-
 
     def test_percentiles_of_an_all_missing_column_are_all_missing(self):
         """Verify that no age at all yields the full index with no values.
@@ -335,6 +336,8 @@ class TestDataPreparation:
 
 
 class TestPlotting:
+    """Testing the functions rendering each individual chart of the report."""
+
     def test_plot_target_distribution(self, raw_X):
         """Verify that the target distribution chart renders one bar per outcome class.
 
@@ -348,7 +351,6 @@ class TestPlotting:
         assert len(ax.patches) == raw_X[config.TARGET_COL].nunique()
         assert config.TARGET_COL in ax.get_title()
 
-
     def test_plot_missing_values_returns_none_when_complete(self, raw_X):
         """Verify that missing values plot returns None when the DataFrame has no NaNs.
 
@@ -357,7 +359,6 @@ class TestPlotting:
         THEN: None is returned instead of a Matplotlib figure
         """
         assert plot_missing_values(raw_X.dropna(axis=1)) is None
-
 
     def test_plot_missing_values_returns_figure(self, raw_X):
         """Verify that missing values plot returns a valid figure when NaNs are present.
@@ -371,7 +372,6 @@ class TestPlotting:
         assert result is not None
         assert isinstance(result[0], plt.Figure)
         assert len(result[1].patches) == len(compute_missing_values(raw_X))
-
 
     def test_plot_outcome_by_feature(self, raw_X):
         """Verify that stacked outcome proportion plot returns a figure with title set.
@@ -387,7 +387,6 @@ class TestPlotting:
         assert isinstance(fig, plt.Figure)
         assert ax.get_title() == "Outcome by Animal Type"
 
-
     def test_plot_outcome_by_feature_empty_dataframe(self):
         """Verify plot_outcome_by_feature handles completely empty DataFrames without errors.
 
@@ -399,10 +398,8 @@ class TestPlotting:
 
         fig, ax = plot_outcome_by_feature(empty_df, config.SEX_COL, "Empty Title")
 
-
         assert isinstance(fig, plt.Figure)
         assert ax.get_title() == "Empty Title"
-
 
     def test_plot_age_distribution(self, raw_X):
         """Verify that age distribution plot generates a panel with boxplot and histogram.
@@ -418,7 +415,6 @@ class TestPlotting:
         assert isinstance(fig, plt.Figure)
         assert len(axes) == 2
 
-
     def test_plot_top_categories_annotates_unique_count(self, raw_X):
         """Verify that top-N category bar chart includes unique category count text.
 
@@ -431,7 +427,6 @@ class TestPlotting:
         _, ax = plot_top_categories(X_dogs, config.BREED_COL, "Dog", top_n=5)
 
         assert any("Unique Categories" in t.get_text() for t in ax.texts)
-
 
     def test_plot_top_categories_respects_top_n(self, raw_X):
         """Verify that plot_top_categories restricts displayed bars to top_n.
@@ -460,7 +455,6 @@ class TestPlotting:
         assert len(ax.patches) == X_dogs[config.BREED_COL].nunique()
         assert len(ax.patches) < 30
 
-
     def test_plot_temporal_outcomes(self, raw_X):
         """Verify temporal outcome plot renders a three-panel grid across time features.
 
@@ -474,7 +468,6 @@ class TestPlotting:
 
         assert isinstance(fig, plt.Figure)
         assert len(axes) == 3
-
 
     def test_plot_outcome_by_feature_handles_nans(self, raw_X):
         """Verify plot_outcome_by_feature handles missing values (NaN) in SexuponOutcome cleanly.
@@ -494,58 +487,58 @@ class TestPlotting:
         assert ax.get_title() == "Outcome by Sex (with NaNs)"
 
 class TestBuildFigures:
+    """Testing the assembly of the full figure catalogue from the individual plots."""
 
     def test_only_the_overall_figures_survive_without_a_known_species(self, raw_X):
-            """Verify that the catalogue degrades to its species-independent part.
+        """Verify that the catalogue degrades to its species-independent part.
 
-            GIVEN: a frame whose species column holds no declared species
-            WHEN: build_figures is executed
-            THEN: only the figures that do not depend on a species are built, the
+        GIVEN: a frame whose species column holds no declared species
+        WHEN: build_figures is executed
+        THEN: only the figures that do not depend on a species are built, the
                   per-species loop having nothing to iterate over
-            """
-            X_alien = raw_X.copy()
-            X_alien[config.SPECIES_COL] = "Bird"
+        """
+        X_alien = raw_X.copy()
+        X_alien[config.SPECIES_COL] = "Bird"
 
-            figures = build_figures(X_alien)
+        figures = build_figures(X_alien)
 
-            assert not any(
-                key.endswith(("_dog", "_cat")) for key in figures
-            )
-            assert "target_distribution" in figures
-
+        assert not any(
+            key.endswith(("_dog", "_cat")) for key in figures
+        )
+        assert "target_distribution" in figures
 
     def test_build_figures_covers_every_expected_plot(self, raw_X):
-            """Verify that the catalogue holds one entry per figure the report needs.
+        """Verify that the catalogue holds one entry per figure the report needs.
 
-            GIVEN: a raw frame carrying both species
-            WHEN: build_figures is executed
-            THEN: the keys name the overall figures and the per-species ones, and
-                  every value is a Figure the caller now owns
-            """
-            figures = build_figures(raw_X)
+        GIVEN: a raw frame carrying both species
+        WHEN: build_figures is executed
+        THEN: the keys name the overall figures and the per-species ones, and
+            every value is a Figure the caller now owns
+        """
+        figures = build_figures(raw_X)
 
-            assert {"target_distribution", "outcome_by_animal_type"} <= set(figures)
-            assert {"age_distribution_dog", "age_distribution_cat"} <= set(figures)
-            assert all(isinstance(fig, plt.Figure) for fig in figures.values())
+        assert {"target_distribution", "outcome_by_animal_type"} <= set(figures)
+        assert {"age_distribution_dog", "age_distribution_cat"} <= set(figures)
+        assert all(isinstance(fig, plt.Figure) for fig in figures.values())
 
     def test_every_declared_species_gets_its_five_figures(self, raw_X):
-            """Verify that no per-species figure silently drops out of the catalogue.
+        """Verify that no per-species figure silently drops out of the catalogue.
 
-            GIVEN: a frame carrying both declared species
-            WHEN: build_figures is executed
-            THEN: each species contributes the same five figures, so that a plot
+        GIVEN: a frame carrying both declared species
+        WHEN: build_figures is executed
+        THEN: each species contributes the same five figures, so that a plot
                   removed from the loop is caught here and not by its absence from the report
-            """
-            figures = build_figures(raw_X)
+        """
+        figures = build_figures(raw_X)
 
-            per_species = {
-                species.lower(): {
-                    key for key in figures if key.endswith(f"_{species.lower()}")
-                }
-                for species in config.SPECIES
+        per_species = {
+            species.lower(): {
+                key for key in figures if key.endswith(f"_{species.lower()}")
             }
+            for species in config.SPECIES
+        }
 
-            assert all(len(keys) == 5 for keys in per_species.values())
+        assert all(len(keys) == 5 for keys in per_species.values())
 
     def test_a_complete_frame_yields_no_missing_values_figure(self, raw_X):
         """Verify that the missing-values plot is omitted when there is nothing to show.
@@ -565,6 +558,7 @@ class TestBuildFigures:
         assert "missing_values" not in figures
 
 class TestSaveFigures:
+    """Testing the writing of the figure catalogue to disk as PNG files."""
 
     def test_save_figures_single_species_only(self, raw_X, tmp_path):
         """Verify save_figures handles datasets containing only one species (e.g. only Dogs).
@@ -582,7 +576,6 @@ class TestSaveFigures:
         assert "outcome_by_sex_dog" in names
         assert "outcome_by_sex_cat" not in names
 
-
     def test_save_figures_writes_files(self, raw_X, tmp_path):
         """Verify save_figures renders and writes species-split figures to disk as PNGs.
 
@@ -598,14 +591,14 @@ class TestSaveFigures:
         assert len(written) > 0
         assert all(path.suffix == ".png" and path.exists() for path in written)
         names = {path.stem for path in written}
-    
+
         assert "target_distribution" in names
         assert "outcome_by_animal_type" in names
         assert "outcome_by_sex_dog" in names
         assert "outcome_by_sex_cat" in names
         assert "age_distribution_dog" in names
         assert "age_distribution_cat" in names
-    
+
         assert not any("binned" in name for name in names)
 
     def test_save_figures_overwrites_existing_files(self, raw_X, tmp_path):
@@ -640,6 +633,7 @@ class TestSaveFigures:
         assert written == sorted(written)
 
 class TestMain:
+    """Testing the end-to-end orchestration of the EDA script."""
 
     def test_main_end_to_end(self, raw_X, tmp_path):
         """Verify full end-to-end execution of the main EDA pipeline script.
@@ -657,6 +651,7 @@ class TestMain:
         assert len(list(figures_dir.glob("*.png"))) > 0
 
 class TestParseArgs:
+    """Testing the command-line interface."""
 
     def test_parse_args_defaults(self):
         """Verify that CLI argument parser returns correct default paths.
@@ -669,7 +664,6 @@ class TestParseArgs:
 
         assert args.csv_path == config.RAW_DATA_PATH
         assert args.figures_dir == config.FIGURES_DIR
-
 
     def test_parse_args_custom_values(self):
         """Verify that CLI argument parser correctly overrides default arguments.
@@ -684,15 +678,11 @@ class TestParseArgs:
         assert str(args.figures_dir) == "out/figs"
 
     def test_an_unknown_option_is_refused(self):
-            """Verify that a misspelt option stops the run.
+        """Verify that a misspelt option stops the run.
 
-            GIVEN: an argument list holding an option the parser does not declare
-            WHEN: parse_args is executed
-            THEN: SystemExit is raised, argparse reporting the error itself
-            """
-            with pytest.raises(SystemExit):
-                parse_args(["--nonexistent", "value"])
-
-
-
-
+        GIVEN: an argument list holding an option the parser does not declare
+        WHEN: parse_args is executed
+        THEN: SystemExit is raised, argparse reporting the error itself
+        """
+        with pytest.raises(SystemExit):
+            parse_args(["--nonexistent", "value"])
