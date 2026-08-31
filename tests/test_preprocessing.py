@@ -5,15 +5,15 @@ Unit tests for the preprocessing module.
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 from sklearn.exceptions import NotFittedError
 
 from src import config
 from src.preprocessing import (
     DataCleaner,
-    drop_rows_missing_required, 
-    extract_age_in_days, 
+    drop_rows_missing_required,
+    extract_age_in_days,
     DAYS_PER_UNIT
 )
 

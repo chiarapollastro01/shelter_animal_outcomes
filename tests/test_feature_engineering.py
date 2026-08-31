@@ -128,7 +128,7 @@ def test_extractors_support_custom_column_names(
 
 
 # =====================================================================
-#                       REQUIRE COLUMNS TESTS 
+#                       REQUIRE COLUMNS TESTS
 # =====================================================================
 
 class TestRequireColumns:
