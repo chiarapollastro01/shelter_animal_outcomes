@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
-import joblib
 import json
+from pathlib import Path
+from typing import Any
+import yaml
+
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
-from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
 
 from src import config
@@ -23,10 +26,6 @@ from src.train import (
     run_tournament,
     train_one_species,
 )
-
-# =====================================================================
-#                              FIXTURES
-# =====================================================================
 
 
 @pytest.fixture
@@ -42,10 +41,10 @@ def mock_training_data() -> tuple[pd.DataFrame, pd.Series]:
     """
     n = 84
 
-    datetimes = list(pd.date_range("2026-01-01", periods=n, freq="h").astype(str))
+    datetimes: list[Any] = list(pd.date_range("2026-01-01", periods=n, freq="h").astype(str))
     datetimes[0] = np.nan
 
-    animal_types = ["Dog", "Cat"] * (n // 2)
+    animal_types: list[Any] = ["Dog", "Cat"] * (n // 2)
     animal_types[5] = np.nan
 
     X = pd.DataFrame(
@@ -77,7 +76,7 @@ def mock_training_data() -> tuple[pd.DataFrame, pd.Series]:
 @pytest.fixture
 def minimal_search_grids() -> dict[str, dict[str, list]]:
     """One candidate per family, so a tournament costs one fit per family."""
-    common = {
+    common: dict[str, list] = {
         "categorical_eng__max_other_ratio": [0.15],
         "smote__k_neighbors": [2],
     }
@@ -107,7 +106,6 @@ def minimal_config_file(tmp_path: Path, minimal_run_params, minimal_search_grids
     integration test needs a real file; using the project's own would run the
     full search grid.
     """
-    import yaml
 
     search_spaces = {"common": {}, **minimal_search_grids}
     path = tmp_path / "params.yaml"
@@ -139,10 +137,6 @@ def dog_slice(mock_training_data) -> tuple[pd.DataFrame, pd.Series]:
     X_clean, y_clean = drop_rows_missing_required(X, y)
     return species_slice(X_clean, y_clean, "Dog")
 
-
-# =====================================================================
-#                        MERGE SEARCH GRIDS
-# =====================================================================
 
 
 class TestMergeSearchGrids:
@@ -219,11 +213,6 @@ class TestMergeSearchGrids:
             merge_search_grids({"knn": {"clf__n_neighbors": [5]}})
 
 
-# =====================================================================
-#                        LOAD TRAINING DATA
-# =====================================================================
-
-
 class TestLoadTrainingData:
     """Testing the reader of the two files prepare_data writes."""
 
@@ -282,11 +271,6 @@ class TestLoadTrainingData:
 
         with pytest.raises(KeyError):
             load_training_data(features_path, target_path)
-
-
-# =====================================================================
-#                          RUN TOURNAMENT
-# =====================================================================
 
 
 class TestRunTournament:
@@ -360,7 +344,7 @@ class TestRunTournament:
             best_search.best_index_
         ]
         assert best_search.best_score_ == pytest.approx(expected)
-        
+
     def test_an_empty_set_of_grids_raises(self, dog_slice, minimal_run_params):
         """Verify that a tournament with nothing to search is refused.
 
@@ -377,9 +361,6 @@ class TestRunTournament:
         with pytest.raises(ValueError, match="empty"):
             run_tournament(X_dogs, y_dogs, cv, {}, minimal_run_params)
 
-# =====================================================================
-#                        TRAIN ONE SPECIES
-# =====================================================================
 
 
 class TestTrainOneSpecies:
@@ -433,6 +414,7 @@ class TestTrainOneSpecies:
         assert metadata["model"] in minimal_search_grids
         assert metadata["metric"] == minimal_run_params["refit"]
         assert metadata["n_samples"] == len(X_dogs)
+        assert metadata["n_samples_searched"] < metadata["n_samples"]
         assert metadata["run_params"]["refit"] == minimal_run_params["refit"]
 
     def test_the_holdout_is_scored_on_the_refit_metric(
@@ -481,10 +463,6 @@ class TestTrainOneSpecies:
             models_dir / config.MODEL_FILE_TEMPLATE.format(species="dog")
         )
         assert len(model.predict(X_dogs)) == len(X_dogs)
-
-# =====================================================================
-#                               MAIN
-# =====================================================================
 
 
 class TestMain:
@@ -568,10 +546,6 @@ class TestMain:
                 minimal_config_file,
                 "Cat",
             )
-
-# =====================================================================
-#                            PARSE ARGS
-# =====================================================================
 
 
 class TestParseArgs:

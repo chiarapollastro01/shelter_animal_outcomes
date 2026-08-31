@@ -237,7 +237,7 @@ def run_tournament(
         if best_search is None or search.best_score_ > best_search.best_score_:
             best_name, best_search = model_name, search
 
-    assert best_search is not None
+    assert best_search is not None, f"empty tournament: {list(search_grids)=}"
     return best_name, best_search
 
 # train_one_species takes six arguments because the tournament needs the data,
@@ -337,7 +337,7 @@ def train_one_species(
         "holdout_score": holdout_score,
         "best_params": best_search.best_params_,
         "n_samples": len(X),
-        "n_samples_scored": len(X_train),
+        "n_samples_searched": len(X_train),
         "refit_on_full_species_data": True,
         # The resolved run parameters are recorded here because config.yaml can
         # change after training: without them the scores above would not say

@@ -5,20 +5,17 @@ This module provides the data cleaning steps that prepare raw shelter data for m
 Exported Classes
 ----------------
 DataCleaner
-    A scikit-learn compatible transformer that orchestrates column dropping, 
+    A scikit-learn compatible transformer that orchestrates column dropping,
     imputations and log-transformation of the age feature.
 
 Exported Functions
 ------------------
-extract_age_in_days(age_series: pd.Series) -> pd.Series
+extract_age_in_days(age_series) -> pd.Series
     Function that parses textual age strings
     (e.g., '2 years', '3 weeks') into equivalent numeric float days.
 
-drop_rows_missing_critical(X, y, critical_cols) -> tuple[pd.DataFrame, pd.Series]
-    Function that removes the rows whose critical columns are missing or unusable,
-    keeping features and target aligned. Runs outside the scikit-learn 
-    pipeline, since a transformer (which only works on features, not target) 
-    cannot drop rows without desynchronising X from y.
+drop_rows_missing_required(X, y, row_required_cols) -> tuple[pd.DataFrame, pd.Series]
+    Function that removes the rows whose required columns are missing or unusable,
 
 Note on the module boundary
 ---------------------------
@@ -26,22 +23,25 @@ Creating log_age_in_days is, strictly speaking, feature engineering: it
 derives a new column rather than repairing an existing one. It lives here
 because the age column is treated as a whole: the raw text is parsed into
 days, the gaps are filled with the median learned during the fit, and the
-logarithm is applied to that same scale. 
+logarithm is applied to that same scale.
 """
 from __future__ import annotations
-from sklearn.exceptions import NotFittedError
-import pandas as pd
-import numpy as np
-import logging
+
 from dataclasses import dataclass, field
-from sklearn.base import TransformerMixin, BaseEstimator
+import logging
+
+import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.exceptions import NotFittedError
 
 from src import config
 
 logger = logging.getLogger(__name__)
 
-# Here 365 is used instead of 365.25, considering that the dataset already contains the writer's own rounding, so half a
-# day of extra precision would be invented, not measured.
+# Here 365 is used instead of 365.25, considering that the dataset already
+# contains the writer's own rounding, so half a day of extra precision
+# would be invented, not measured.
 DAYS_PER_UNIT: dict[str, float] = {
     "year": 365.0,
     "month": 30.0,
@@ -54,15 +54,15 @@ _UNIT_PATTERN = r"\b(year|month|week|day)s?\b"
 
 def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     """
-    Convert a textual Series of age (e.g., '2 years') 
+    Convert a textual Series of age (e.g., '2 years')
     into a numeric Series of days (float).
 
-    
+
     Parameters
     ----------
     age_series : pd.Series
         Pandas Series containing textual age representations (e.g., '2 years').
-        
+
     Returns
     -------
     pd.Series
@@ -83,7 +83,7 @@ def extract_age_in_days(age_series: pd.Series) -> pd.Series:
     """
 
     text = age_series.astype(str).str.lower()
-    
+
     numeric_values = pd.to_numeric(
         text.str.extract(_NUMBER_PATTERN, expand=False),
         errors="coerce"
@@ -117,12 +117,13 @@ def drop_rows_missing_required(
     -------
     tuple[pd.DataFrame, pd.Series]
         The surviving rows, both re-indexed from zero.
-    
+
     Raises
     ------
     KeyError
         If any of row_required_cols is absent from X
-        Examples
+        
+    Examples
     --------
     >>> import pandas as pd
     >>> X = pd.DataFrame({
@@ -152,7 +153,7 @@ def drop_rows_missing_required(
         )
 
     return X.loc[mask].reset_index(drop=True), y.loc[mask].reset_index(drop=True)
- 
+
 @dataclass
 class DataCleaner(BaseEstimator, TransformerMixin):
     """
@@ -197,7 +198,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
     Notes
     -----
     The column names read from the input are configurable, but the name of the
-    column written out is not: it is fixed to config.LOG_AGE_COL``, which is
+    column written out is not: it is fixed to config.LOG_AGE_COL, which is
     the name the ColumnTransformer downstream looks for when scaling.
 
     """
@@ -242,7 +243,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
             self.age_median_,
          )
         return self
-    
+
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Apply learned statistics to clean and impute the dataset.
 
@@ -259,7 +260,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
         -------
         pd.DataFrame
             Cleaned copy of the input DataFrame.
-        
+
         Raises
         ------
         NotFittedError
@@ -272,7 +273,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
         X_clean = X.copy()
         X_clean = X_clean.drop(columns=list(self.columns_to_remove), errors="ignore")
 
-        # Runs before the mode imputation below, so a column listed in fill_targets never reaches it: 
+        # Runs before the mode imputation below so a column listed in fill_targets never reaches it:
         # config keeps sex out of that tuple (test_the_sex_column_is_not_filled_with_a_literal).
         fill_values = {col: "Unknown" for col in self.fill_targets if col in X_clean.columns}
         X_clean = X_clean.fillna(value=fill_values)
@@ -296,13 +297,11 @@ class DataCleaner(BaseEstimator, TransformerMixin):
                 logger.info(
                     "Imputed %d missing %s -> median %.1f days",
                     n_missing_age,
-                    self.age_col,   
+                    self.age_col,
                     self.age_median_,
                 )
-                
+
             X_clean[config.LOG_AGE_COL] = np.log1p(age_days)
             X_clean = X_clean.drop(columns=[self.age_col])
-            
+
         return X_clean
-
-

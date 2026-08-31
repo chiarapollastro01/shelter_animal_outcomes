@@ -1,10 +1,10 @@
 """
 Test suite for the pipeline module.
 """
-import pandas as pd
-import numpy as np 
-import pytest
 from imblearn.pipeline import Pipeline as ImbPipeline
+import numpy as np
+import pandas as pd
+import pytest
 
 from src import config
 from src.pipeline import (
@@ -53,7 +53,8 @@ def raw_mock_shelter_data() -> tuple[pd.DataFrame, pd.Series]:
     return X, y
 
 class TestAvailableModels:
-    
+    """Testing the listing of the registered classifier families."""
+
     def test_available_models_returns_registered_families(self):
         """Verify that available_models returns the correct tuple of registered classifier families.
 
@@ -62,11 +63,12 @@ class TestAvailableModels:
         THEN: it returns a tuple with exactly the registered classifier keys
         """
         models = available_models()
-    
+
         assert isinstance(models, tuple)
         assert set(models) == {"knn", "logistic_regression", "random_forest"}
 
 class TestGetModelPipeline:
+    """Testing the assembly of the full imbalanced-learn pipeline for a given model family."""
 
     def test_get_model_pipeline_invalid_type_raises_value_error(self):
         """Verify that get_model_pipeline raises a ValueError for an unsupported model type.
@@ -78,12 +80,12 @@ class TestGetModelPipeline:
         """
         with pytest.raises(ValueError, match="Unknown model type") as exc_info:
             get_model_pipeline(model_type="xgboost_unregistered")
-        
+
         assert isinstance(exc_info.value.__cause__, KeyError)
         assert "knn" in str(exc_info.value)
 
     @pytest.mark.parametrize("model_type", available_models())
-    def test_get_model_pipeline_returns_valid_imb_pipeline(self, model_type: str):  
+    def test_get_model_pipeline_returns_valid_imb_pipeline(self, model_type: str):
         """Verify that get_model_pipeline returns a valid ImbPipeline for each supported model type.
 
         GIVEN: any supported model family
@@ -96,6 +98,7 @@ class TestGetModelPipeline:
         assert [name for name, _ in pipeline.steps] == EXPECTED_STEPS
 
 class TestBuildPreprocessTransformer:
+    """Testing the column transformer routing categorical and numerical columns to their branch."""
 
     def test_build_preprocess_transformer_routes_each_column_group(self):
         """Verify that each branch receives the column group it is meant for.
@@ -126,9 +129,11 @@ class TestBuildPreprocessTransformer:
         assert transformer.remainder == "passthrough"
 
 class TestPipelineEndToEnd:
+    """Testing the full pipeline fitted and used for prediction on mock shelter data."""
+
     @pytest.mark.parametrize("model_type", available_models())
     def test_pipeline_end_to_end_fit_and_predict(self, raw_mock_shelter_data, model_type: str):
-        """Verify that the full pipeline can be fit and used for predictions.  
+        """Verify that the full pipeline can be fit and used for predictions.
 
         GIVEN: raw mock features and an imbalanced target
         WHEN: fit and predict run on the full pipeline
@@ -174,11 +179,11 @@ class TestPipelineEndToEnd:
         X_train, y_train = raw_mock_shelter_data
         pipeline = get_model_pipeline(model_type="logistic_regression")
         pipeline.fit(X_train, y_train)
-    
+
         X_test_unseen = X_train.iloc[:1].copy()
         X_test_unseen[config.BREED_COL] = "Dragon Mix"
         X_test_unseen[config.COLOR_COL] = "Sparkly Golden"
-    
+
         predictions = pipeline.predict(X_test_unseen)
         assert len(predictions) == 1
 

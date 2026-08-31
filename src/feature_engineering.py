@@ -571,7 +571,7 @@ class CategoricalFeaturesEngineer(BaseEstimator, TransformerMixin):
                 X_clean[col] = cleaner(X_clean[col])
         return X_clean
 
-    def fit(self, X: pd.DataFrame, y: pd.Series | None = None)-> "CategoricalFeaturesEngineer":
+    def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> "CategoricalFeaturesEngineer":
         """Fit internal RareCategoriesGrouper on primary representations of target columns.
 
         Each declared column is first reduced to its primary form when a rule

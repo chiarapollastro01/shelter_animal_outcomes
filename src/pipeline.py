@@ -1,7 +1,7 @@
 """Model pipeline for the Shelter Animal Outcomes classifiers.
 
 Builds the full end-to-end pipeline: cleaning -> feature engineering ->
-encoding/scaling -> SMOTE -> classifier. 
+encoding/scaling -> SMOTE -> classifier.
 
 Exported Functions
 ------------------
@@ -18,8 +18,10 @@ get_model_pipeline(model_type) -> ImbPipeline
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
+from functools import partial
+import logging
+
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 from sklearn.base import ClassifierMixin
@@ -28,8 +30,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
-from functools import partial
 
+from src import config
 from src.feature_engineering import (
     CategoricalFeaturesEngineer,
     NameFeaturesExtractor,
@@ -37,8 +39,6 @@ from src.feature_engineering import (
     TemporalFeaturesExtractor,
 )
 from src.preprocessing import DataCleaner
-
-from src import config
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def available_models() -> tuple[str, ...]:
     -------
     tuple[str, ...]
         Tuple of registered model identifier strings.
-        
+
     Examples
     --------
     >>> available_models()
@@ -89,9 +89,10 @@ def build_preprocess_transformer() -> ColumnTransformer:
             ),
             ("scale_num", MinMaxScaler(), list(config.NUM_SCALE_COLS)),
         ],
-# Everything not listed in either branch reaches the classifier through the
-# passthrough remainder: the three binary indicators (weekend, mix and name), already in [0, 1] and
-# therefore compatible with the min-max scaled features KNN compares them to.
+        # Everything not listed in either branch reaches the classifier through the
+        # passthrough remainder: the three binary indicators (weekend, mix and name),
+        # already in [0, 1] and therefore compatible with the min-max scaled features
+        # KNN compares them to.
         remainder="passthrough",
     )
 
@@ -135,8 +136,9 @@ def get_model_pipeline(model_type: str) -> ImbPipeline:
         ("sex_eng", SexFeaturesExtractor()),
         ("name_eng", NameFeaturesExtractor()),
         ("onehot_and_scale", build_preprocess_transformer()),
-        # SMOTE rebalances the classes inside the pipeline. It only runs on the training folds 
-        # (imblearn contract), so the validation folds always keep the true class distribution (no data leakage)
+        # SMOTE rebalances the classes inside the pipeline. It only runs on the training folds
+        # (imblearn contract), so the validation folds always keep the true class distribution
+        # (no data leakage)
         ("smote", SMOTE(random_state=config.RANDOM_STATE)),
         ("clf", clf),
     ])

@@ -42,8 +42,10 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from sklearn.model_selection import train_test_split
+
 import pandas as pd
+from sklearn.model_selection import train_test_split
+
 from src import config
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,8 @@ def prepare_and_split_data(
     test_size: float,
     random_state: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-    """Read raw CSV, extract target, drop target leakage columns, and perform stratified train/test split.
+    """Read raw CSV, extract target, drop target leakage columns,
+       and perform stratified train/test split.
 
     Parameters
     ----------
@@ -174,7 +177,7 @@ def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
         - output_dir (Path): Destination directory for the split CSV files.
         - config_path (Path): Path to the YAML configuration file.
         - random_state (int): Random seed for reproducible splitting.
-    
+
     Examples
     --------
     >>> args = parse_args(["data/raw_data/train.csv", "--random-state", "7"])
@@ -185,8 +188,8 @@ def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "raw_csv_path", 
-        type=Path, 
+        "raw_csv_path",
+        type=Path,
         nargs="?",
         default=config.RAW_DATA_PATH,
         help="Path to raw train.csv",
@@ -210,16 +213,16 @@ def parse_args(args_list: list[str] | None = None) -> argparse.Namespace:
         default=config.RANDOM_STATE,
         help="Random state for reproducibility",
     )
-    
+
     return parser.parse_args(args_list)
 
 
-if __name__ == "__main__":  
+if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    args = parse_args()  
+    args = parse_args()
     main(raw_csv_path=args.raw_csv_path,
         output_dir=args.output_dir,
         config_path=args.config_path,

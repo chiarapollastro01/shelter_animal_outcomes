@@ -12,8 +12,6 @@ import pytest
 from sklearn.dummy import DummyClassifier
 
 from src import config
-import logging
-
 from src.evaluate import (
     evaluate_model,
     load_test_data,

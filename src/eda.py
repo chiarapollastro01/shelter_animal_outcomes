@@ -1,12 +1,11 @@
 """Exploratory Data Analysis script for the Shelter Animal Outcomes dataset.
 
-Loads the raw dataset, performs feature enrichment (age in days, temporal breakdowns),
-and computes statistical distributions. Generates a comprehensive suite
-of plots, including target imbalances, missing value profiles, species-split age
-distributions, species-split sex distributions, top breed and color categories, and temporal trends; and
-and and persists them to disk one at a time, without displaying them.
+Generates a comprehensive suite of plots, including target imbalances, missing value profiles, 
+species-split age distributions, species-split sex distributions, top breed and color categories,
+and temporal trends; and persists them to disk one at a time, without displaying them.
 
-Explanations about these generated visualizations are documented in the accompanying EDA report (`reports/eda.md`).
+Explanations about these generated visualizations are documented in the accompanying EDA report
+(reports/eda.md).
 
 Exported Functions
 ------------------
@@ -27,18 +26,17 @@ python -m src.eda
 Or specifying custom input data and output figures directory:
 python -m src.eda data/raw_data/train.csv --figures-dir reports/figures
 """
-
 from __future__ import annotations
 
 import argparse
 import logging
-import numpy as np
 from pathlib import Path
-from typing import Any
+
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
- 
+
 from src import config
 from src.preprocessing import extract_age_in_days
 
@@ -61,7 +59,7 @@ HOUR_COL: str = "Hour"
 WEEKDAY_NAME_COL: str = "Weekday_Name"
 
 # ---------------------------------------------------------------------------
-# Data preparation 
+# Data preparation
 # ---------------------------------------------------------------------------
 def compute_missing_values(X: pd.DataFrame) -> pd.Series:
     """Identify and count missing values per column.
@@ -132,7 +130,7 @@ def add_eda_features(X: pd.DataFrame) -> pd.DataFrame:
 def split_by_species(X: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Partition DataFrame into separate sub-frames per species.
 
-    The set of species comes from `config.SPECIES`. 
+    The set of species comes from `config.SPECIES`.
     Only species with at least 1 row present in X will be included.
 
     Parameters
@@ -163,16 +161,16 @@ def compute_outcome_crosstab(
         DataFrame containing the feature and `config.TARGET_COL`.
     feature : str
         Name of the feature column to cross-tabulate against `config.TARGET_COL`.
-    normalize : str, default="index"
+    normalize : str | None, default="index"
         Normalization strategy ('index', 'columns', 'all', or None for raw counts).
 
     Returns
     -------
     pd.DataFrame
         Cross-tabulated frequency or proportion table.
-    
+
     Raises
-    -------
+    ------
     ValueError
         If the normalize value is unknown.
     """
@@ -221,7 +219,7 @@ def compute_age_percentiles(X: pd.DataFrame) -> pd.Series:
 
 
 # ---------------------------------------------------------------------------
-# Plotting 
+# Plotting
 # ---------------------------------------------------------------------------
 
 def plot_target_distribution(
@@ -290,7 +288,8 @@ def plot_outcome_by_feature(
     X: pd.DataFrame, feature: str, title: str,
     figsize: tuple[int, int] = (10, 5),
 ) -> tuple[plt.Figure, plt.Axes]:
-    """Stacked bar chart of normalized outcome proportions across each level of the specified feature.
+    """Stacked bar chart of normalized outcome proportions
+       across each level of the specified feature.
 
     Parameters
     ----------
@@ -317,7 +316,7 @@ def plot_outcome_by_feature(
     ct = compute_outcome_crosstab(X, feature)
     if not ct.empty:
         ct.plot(kind="bar", stacked=True, ax=ax, colormap="Set2")
-    
+
     ax.set_title(title, fontweight="bold")
     ax.set_ylabel("Proportion")
     ax.set_xlabel(feature)
@@ -393,7 +392,7 @@ def plot_top_categories(
     ax.set_ylabel("Count")
     ax.text(0.95, 0.85, f"Unique Categories: {X[feature].nunique()}",
             transform=ax.transAxes, ha="right", va="top", fontsize=11,
-            bbox=dict(facecolor="white", alpha=0.9, edgecolor="gray"))
+            bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "gray"})
     ax.tick_params(axis="x", rotation=90)
     fig.tight_layout()
     return fig, ax
@@ -415,8 +414,8 @@ def plot_temporal_outcomes(
 
     Returns
     -------
-    tuple[plt.Figure, Any]
-        Matplotlib Figure and a 1-D array of the two Axes.
+    tuple[plt.Figure, np.ndarray]
+        Matplotlib Figure and a 1-D array of the three Axes.
     """
     fig, axes = plt.subplots(1, 3, figsize=figsize)
 
@@ -459,15 +458,15 @@ def plot_temporal_outcomes(
 
 def build_figures(X: pd.DataFrame) -> dict[str, plt.Figure]:
     """Build every EDA figure and return them keyed by output file stem.
- 
+
     Kept separate from the saving step so that the figure catalogue can be
     inspected and tested without touching the filesystem.
- 
+
     Parameters
     ----------
     X : pd.DataFrame
         Raw dataset, as read from the source CSV.
- 
+
     Returns
     -------
     dict[str, plt.Figure]
@@ -476,18 +475,18 @@ def build_figures(X: pd.DataFrame) -> dict[str, plt.Figure]:
     """
     X_eda = add_eda_features(X)
     by_species = split_by_species(X_eda)
- 
+
     figures: dict[str, plt.Figure] = {
         "target_distribution": plot_target_distribution(X)[0],
         "outcome_by_animal_type": plot_outcome_by_feature(
             X, config.SPECIES_COL, f"Outcome Distribution by {config.SPECIES_COL}"
         )[0],
     }
- 
+
     missing = plot_missing_values(X)
     if missing is not None:
         figures["missing_values"] = missing[0]
- 
+
     for species, X_species in by_species.items():
         key = species.lower()
         logger.info(
@@ -501,25 +500,25 @@ def build_figures(X: pd.DataFrame) -> dict[str, plt.Figure]:
         figures[f"top_breeds_{key}"] = plot_top_categories(X_species, config.BREED_COL, species)[0]
         figures[f"top_colors_{key}"] = plot_top_categories(X_species, config.COLOR_COL, species)[0]
         figures[f"temporal_outcomes_{key}"] = plot_temporal_outcomes(X_species, species)[0]
- 
+
     return figures
- 
- 
+
+
 def save_figures(X: pd.DataFrame, figures_dir: Path) -> list[Path]:
     """Render every EDA figure and write it to disk.
- 
+
     Figures are written one at a time. Matplotlib does not guarantee
     thread-safety, and this step produces a handful of files once, offline, so
     concurrency would buy a couple of seconds in exchange for a correctness
     argument that cannot be made from the library documentation.
- 
+
     Parameters
     ----------
     X : pd.DataFrame
         Raw dataset, as read from the source CSV.
     figures_dir : Path
         Destination directory. Created if it does not exist.
- 
+
     Returns
     -------
     list[Path]
@@ -527,14 +526,14 @@ def save_figures(X: pd.DataFrame, figures_dir: Path) -> list[Path]:
     """
     figures_dir.mkdir(parents=True, exist_ok=True)
     figures = build_figures(X)
- 
+
     written: list[Path] = []
     for name, fig in figures.items():
         out_path = figures_dir / f"{name}.png"
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
         plt.close(fig)  # release the figure as soon as it is on disk
         written.append(out_path)
- 
+
     logger.info("Saved %d figures to %s", len(written), figures_dir)
     return sorted(written)
 

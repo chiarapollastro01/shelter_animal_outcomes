@@ -1,10 +1,12 @@
 """Unit tests for the data preparation module."""
 
 from pathlib import Path
+
 import pandas as pd
 import pytest
+
 from src import config
-from src.prepare_data import main, prepare_and_split_data, parse_args
+from src.prepare_data import main, parse_args, prepare_and_split_data
 from src.train import load_training_data
 
 
@@ -35,13 +37,14 @@ def minimal_config_file(tmp_path: Path) -> Path:
     return path
 
 class TestPrepareAndSplitData:
-    
+    """Testing the reading, target extraction, and stratified split of the raw file."""
+
     def test_prepare_and_split_data_success(self, dummy_raw_csv: Path):
         """Test successful execution of data preparation and splitting.
 
         GIVEN: a valid raw CSV file containing target and leakage columns
         WHEN: prepare_and_split_data is executed
-        THEN: it returns X_train, X_test, y_train, y_test, with correct split 
+        THEN: it returns X_train, X_test, y_train, y_test, with correct split
         proportions and OutcomeType and OutcomeSubtype columns removed
         """
         X_train, X_test, y_train, y_test = prepare_and_split_data(
@@ -204,6 +207,7 @@ class TestPrepareAndSplitData:
 
 
 class TestMain:
+    """Testing the orchestration of data preparation and the artefacts it writes to disk."""
 
     def test_the_written_files_are_readable_by_train(
         self, dummy_raw_csv: Path, minimal_config_file: Path, tmp_path: Path):
@@ -228,7 +232,9 @@ class TestMain:
 
         assert len(X) == len(y)
 
-    def test_main_execution_creates_files(self, dummy_raw_csv: Path, minimal_config_file: Path, tmp_path: Path):
+    def test_main_execution_creates_files(
+        self, dummy_raw_csv: Path, minimal_config_file: Path, tmp_path: Path
+    ):
         """Test that main execution creates output files in a non-existent directory.
 
         GIVEN: valid input paths and non-existent output directories
@@ -266,14 +272,17 @@ class TestMain:
         assert len(X_train_saved) == 8
 
 class TestParseArgs:
+    """Testing the command-line interface."""
+
     def test_parse_args_defaults(self):
         """Verify that parse_args falls back to config defaults when no arguments are provided.
 
         GIVEN: an empty argument list
         WHEN: the parse_args function is executed with this list
-        THEN: raw_csv_path, output_dir, config_path and random_state all fall back to their config defaults
+        THEN: raw_csv_path, output_dir, config_path and random_state all fall back to their config
+              defaults
         """
-    
+
         args = parse_args([])
 
         assert args.raw_csv_path == config.RAW_DATA_PATH
@@ -294,7 +303,7 @@ class TestParseArgs:
             "--config", "custom/params.yaml",
             "--random-state", "123",
         ])
-    
+
         assert args.raw_csv_path == Path("my_raw_data.csv")
         assert args.output_dir == Path("custom/dir")
         assert args.config_path == Path("custom/params.yaml")
