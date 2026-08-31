@@ -1,3 +1,12 @@
+| **Authors** | **Project** | **Build Status** | **Coverage** |
+|:-----------:|:-----------:|:----------------:|:------------:|
+| [**C. Pollastro**](https://github.com/chiarapollastro01) | **shelter-animal-outcomes** | [![CI](https://github.com/chiarapollastro01/shelter_animal_outcomes/actions/workflows/ci.yml/badge.svg)](https://github.com/chiarapollastro01/shelter_animal_outcomes/actions/workflows/ci.yml) | **100%** |
+
+[![GitHub pull-requests](https://img.shields.io/github/issues-pr/chiarapollastro01/shelter_animal_outcomes.svg?style=plastic)](https://github.com/chiarapollastro01/shelter_animal_outcomes/pulls)
+[![GitHub issues](https://img.shields.io/github/issues/chiarapollastro01/shelter_animal_outcomes.svg?style=plastic)](https://github.com/chiarapollastro01/shelter_animal_outcomes/issues)
+[![GitHub stars](https://img.shields.io/github/stars/chiarapollastro01/shelter_animal_outcomes.svg?label=Stars&style=social)](https://github.com/chiarapollastro01/shelter_animal_outcomes/stargazers)
+[![GitHub watchers](https://img.shields.io/github/watchers/chiarapollastro01/shelter_animal_outcomes.svg?label=Watch&style=social)](https://github.com/chiarapollastro01/shelter_animal_outcomes/watchers)
+
 # shelter-animal-outcomes v0.1.0
 
 ### Multi-class classification of shelter animal outcomes 
@@ -42,7 +51,7 @@ consequences follow, and each one dictates a design decision.
 **Every split must be stratified.**  In *k*-fold cross-validation, the training dataset is split into multiple equal subsets, training on *k-1* folds and evaluating on the remaining one in rotation to ensure the model generalizes reliably. Splitting data just once risks picking an unusually easy or hard validation partition, leading to hyperparameters that overfit to that specific split. Furthermore, in a dataset with so few minority examples, a uniform random split can easily hand a fold a class distribution unlike the population's, or none of a rare class at all. Both the train/test split and the cross-validation folds preserve the class proportions, using `train_test_split(stratify=y)` and `StratifiedKFold`.
 
 **The rare classes need help during training.** Rather than duplicating identical rows (which causes overfitting), the pipeline applies
-[**SMOTE**], which creates synthetic minority examples by interpolating between a minority point and one of its *k* nearest minority neighbours. `k_neighbors` is itself a tuned hyperparameter, because how far the interpolation reaches is a modelling choice and not a constant of nature. 
+SMOTE, which creates synthetic minority examples by interpolating between a minority point and one of its *k* nearest minority neighbours. `k_neighbors` is itself a tuned hyperparameter, because how far the interpolation reaches is a modelling choice and not a constant of nature. 
 
 ### Resampling belongs inside the pipeline, not before it
 
@@ -50,7 +59,7 @@ Applying data cleaning or oversampling before splitting the data causes data lea
 
 ### Every choice is a hyperparameter, and they are searched together
 
-Hyperparameters for data preprocessing (max_other_ratio for rare category binning and k_neighbors for SMOTE interpolation) are tuned simultaneously with classifier parameters (n_estimators, C). Tuning them in separate stages would incorrectly assume that the best data representation is independent of the model consuming it; searching them jointly finds the true global optimum. Randomized search is ideal for large, continuous search spaces, but here the grid is deliberately small, discrete, and domain-informed. This choice provides a trade-off between an exhaustive search and computational cost.
+Hyperparameters for data preprocessing (`max_other_ratio` for rare category binning and `k_neighbors` for SMOTE interpolation) are tuned simultaneously with classifier parameters (`n_estimators`, `C`). Tuning them in separate stages would incorrectly assume that the best data representation is independent of the model consuming it; searching them jointly finds the best combination in the grid. Randomized search is ideal for large, continuous search spaces, but here the grid is deliberately small, discrete, and domain-informed. This choice provides a trade-off between an exhaustive search and computational cost.
 
 ### Encoding choices follow from the distributions
 
@@ -66,7 +75,7 @@ High-cardinality attributes `Breed` and `Color` are first reduced to their prima
 
 Three families compete per species: K-nearest neighbours, multinomial logistic regression and random forest, each over its own grid combined with the shared preprocessing grid, for 90 configurations and 450 fits per species. The winner is the configuration with the best mean cross-validated macro-F1.
 
-Taking the maximum over 90 estimates is itself optimistic: the winner is partly selected on the noise of its own validation score. To measure that optimism, a **hold-out set is isolated per species before the search begins** and the winner is scored on it once. The gap between the cross-validation F1-macro and the holdout F1-macro is very small, as as shown in [reports/results.md](./reports/results.md),  which is the evidence that the tuning did not overfit the
+Taking the maximum over 90 estimates is itself optimistic: the winner is partly selected on the noise of its own validation score. To measure that optimism, a **hold-out set is isolated per species before the search begins** and the winner is scored on it once. The gap between the cross-validation F1-macro and the holdout F1-macro is very small, as shown in [reports/results.md](./reports/results.md),  which is the evidence that the tuning did not overfit the
 folds.
 
 > [!NOTE]
@@ -99,7 +108,7 @@ sha256sum -c data/metadata/checksums.txt
 
 ## Installation
 
-![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
 ```bash
 python -m venv .venv
@@ -174,6 +183,8 @@ pytest
 mypy src/ tests/
 pylint src/ tests/
 ```
+The same three commands run on every push and pull request through
+[GitHub Actions](./.github/workflows/ci.yml).
 
 `pytest` collects both `tests/` and `src/`: the second because the docstring examples are run as part of the suite, so an example cannot drift away from the code it documents.
 
@@ -191,8 +202,9 @@ Coverage is at 100%.
 | [`tests`](./tests/) | The test suite, one module per source module. |
 | [`data/metadata`](./data/metadata/) | Provenance, dataset card and checksum of the raw file. |
 | [`reports`](./reports/) | The exploratory findings and the evaluation results. |
+| [`.github/workflows`](./.github/workflows/) | The CI workflow, running the checks on every push. |
 
-## Layout
+### Layout
 
 ```
 config.yaml            run parameters: split sizes, folds, metrics, 
@@ -213,6 +225,8 @@ reports/results.md     what the trained models score, and what that
                        means
 reports/figures/       the EDA figures (not versioned, regenerated on 
                        demand)
+AUTHORS.md             who wrote this and in what context
+.github/workflows/     the CI workflow
 src/                   the package
 tests/                 the test suite
 ```
@@ -235,18 +249,18 @@ tests/                 the test suite
 [`src/config.py`](./src/config.py) holds what describes the **data**: column names, feature groups, the paths where the datasets live. Changing any of it is a code change, so it sits next to the code.
 
 [`config.yaml`](./config.yaml) holds what describes a **run**: the split
-proportions, the number of folds, the scoring metrics, the metric the winner is refit on, and the hyperparameter search grids. Changing those is an analysis decision, so the file can be swapped without a commit:
+proportions, the number of folds, the scoring metrics, the metric the winner is refit on, and the hyperparameter search grids. Changing those is an analysis decision, so a different file can be handed to any step without a commit:
 
 ```bash
-snakemake --cores all --configfile experiments/wide_grid.yaml
+python -m src.train --config experiments/wide_grid.yaml --species Dog
 ```
 
 ### Generality
 
 The dataset schema lives in one file: column names are read from
-`src/config.py` and never spelled out in the modules; the transformers take them as constructor parameters, so renaming `AgeuponOutcome` means editing one line. Adding a species is a one-line change to `config.SPECIES`. This is asserted, not assumed:
+`src/config.py` and never spelled out in the modules; the transformers take them as constructor parameters, so renaming `AgeuponOutcome` means editing one line. Adding a species is a one-line change to `config.SPECIES` plus the addition of a colour of its own in `SPECIES_COLORS` (`src/eda.py`). The column side of this is asserted, not assumed:
 `test_extractors_support_custom_column_names` runs every transformer against renamed columns, `TestDataCleanerCustomAndE2E` covers custom fill targets and dropped columns, and the training tests are parametrised over `config.SPECIES` rather than over `Dog` and `Cat`.
-The generality has two boundaries. The names of the columns the transformers *write* are fixed, `DataCleaner` always produces `config.LOG_AGE_COL` whatever the input column was called, therefore renaming works on the way in, not on the way out. And adding a derived feature takes two steps, not one: the `ColumnTransformer` routes columns by name, so a new column that is not listed in `NUM_SCALE_COLS` or `CAT_ENCODE_COLS` reaches the classifier through
+The generality has two further boundaries. The names of the columns the transformers *write* are fixed, e.g.  `DataCleaner` always produces `config.LOG_AGE_COL` whatever the input column was called, therefore renaming works on the way in, not on the way out. And adding a derived feature takes two steps, not one: the `ColumnTransformer` routes columns by name, so a new column that is not listed in `NUM_SCALE_COLS` or `CAT_ENCODE_COLS` reaches the classifier through
 `remainder="passthrough"`, unscaled and unencoded, without raising anything.
 
 ## Contribution
@@ -254,8 +268,7 @@ The generality has two boundaries. The names of the columns the transformers *wr
 Any contribution is more than welcome. Please open an issue or a pull request describing what you would change and why.
 
 Code contributed to this project is expected to keep the suite green
-(`pytest`), the type checker silent (`mypy`), and `pylint` at 10.00/10, and to
-document every public function with a numpydoc docstring whose examples run.
+(`pytest`), the type checker silent (`mypy`), and `pylint` at 10.00/10, and to document every public function with a numpydoc docstring whose examples run.
 
 ## Authors
 
