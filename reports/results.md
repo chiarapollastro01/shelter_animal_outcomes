@@ -49,13 +49,12 @@ Each classifier pipeline combines the common preprocessing steps with model-spec
 | `max_other_ratio` | 0.15 | 0.15 |
 | `smote__k_neighbors` | 3 | 5 |
 
-The exact library versions behind these figures are frozen in
-`requirements-lock.txt`.
+Two grid points can sit closer than the noise: an earlier run of this same code, on a different patch release of scikit-learn, crowned different but statistically indistinguishable hyperparameters. The exact versions behind these figures are frozen in `requirements-lock.txt`.
 
-The CV F1-macro represents the mean score across the 5 validation folds used during hyperparameter tuning, while the hold-out score evaluates the winning configuration trained on the 80% split against the isolated 20% validation set. The final model artifact saved to disk refits this optimal configuration on 100% of the species dataset, as each sidecar records under `refit_on_full_species_data`.  The test-set
-tables below therefore come from a fully refitted model, that no score in this intermediate table measures.
+The CV F1-macro represents the mean score across the 5 validation folds used during hyperparameter tuning, while the hold-out score evaluates the winning configuration trained on the 80% split against the isolated 20% validation set. The final model artifact saved to disk refits this optimal configuration on 100% of the species dataset, as each sidecar records under `refit_on_full_species_data`.The test-set
+tables below therefore come from a fully refitted model that no score in this intermediate table measures.
 
-The random forest wins both tournaments, ahead of the K-nearest-neighbours andthe logistic regression, indicating that the nonlinear interactions captured by the tree-based model are the most representative for this task. 
+The random forest wins both tournaments, ahead of the K-nearest-neighbours and the logistic regression, indicating that the nonlinear interactions captured by the tree-based model are the most representative for this task. 
 
 **`max_depth=15` beats `None` on both.** There was a possibility of having pure leaves (terminal node where 100% of the training samples belong to the exact same target class), but the model discarded it: unbounded depth could easily lead to memorizing of the training fold, which results in overfitting.
 
@@ -86,7 +85,21 @@ This distortion becomes evident when evaluating unweighted metrics:
 balanced accuracy, the mean of the per-class recalls, drops about 17 percentage points below standard accuracy for dogs and about 24 points for cats. The two numbers describe the same
 predictions: the distance between them is what the frequent classes were
 contributing. On dogs, balanced accuracy (0.4089) and F1-macro (0.4095) converge almost identically, as both refuse to scale a class's importance by its sample prevalence.
-This persistent gap is precisely why F1-macro was chosen as the tournament selection metric. Optimising purely on accuracy would reward a model that ignores rare outcomes altogether: for example, Died accounts for only 50 dog records out of 15,595. After the species split, hold-out isolation, and 5-fold cross-validation, an individual fold sees barely a handful of these cases; macro-averaging prevents these critical minority classes from vanishing into the aggregate score.
+Optimising purely on accuracy would reward a model that ignores rare outcomes altogether: for example, Died accounts for only 50 dog records out of 15 595. After the species split, hold-out isolation, and 5-fold cross-validation, an individual fold sees barely a handful of these cases; macro-averaging prevents these critical minority classes from vanishing into the aggregate score.
+
+Read against the right baselines, the macro score is less bleak than it looks. The 0.417 and 0.494 quoted above are *accuracies*; the same majority-class strategy scores far worse on the metric that actually selected the model:
+
+| Strategy | Dog | Cat |
+| --- | ---: | ---: |
+| Always the majority class | 0.1177 | 0.1323 |
+| Uniform random guess | 0.1632 | 0.1485 |
+| Random, in proportion to the classes | 0.2000 | 0.2000 |
+| **This model** | **0.4095** | **0.5255** |
+
+Always predicting `Adoption` earns an F1 of 0.588 on that one class and zero on the other four, so the macro average lands at 0.118, which is the whole point of choosing F!-macro. The proportional baseline is 0.2 on both species and would be 0.2 on any dataset: guessing at each class's prevalence makes precision and recall both equal to it, so every F1 equals the prevalence and their mean is necessarily 1/K.
+
+The ceiling matters too. `Died` contributes zero to the dog average and cannot realistically do otherwise on ten test rows, so four fifths is the most the macro score can reach: 0.4095 should be confronted with that.
+
 
 ### Per class
 
@@ -113,7 +126,7 @@ The previous metrics average over the five classes, whose support differs substa
 | Died | 0.19 | 0.21 | 0.20 | 29 |
 
 
-**For dogs, across the 10 test-set instances of Died, precision, recall, and F1 are all 0. The class holds 50 rows in the whole dataset, and after
+**For dogs**, across the 10 test-set instances of Died, precision, recall, and F1 are all 0. The class holds 50 rows in the whole dataset, and after
 the species split, the hold-out and the cross-validation folds, a single fold sees a handful: SMOTE interpolates between neighbours that are themselves too few to describe the class. For cats, the same class achieves an F1 of 0.20 across 29 test rows: still modest, but no longer completely unrepresented.
 
 **Class predictability reflects real-world species dynamics.** `Return_to_owner` is 0.52 on dogs and 0.30 on cats, and the difference
@@ -122,7 +135,7 @@ stems directly from sample prevalence: 857 test rows against 100. A cat that goe
 **Precision-recall trade-offs.**
 While precision measures prediction purity (the proportion of predicted instances that are genuinely correct, penalising false alarms), recall measures detection coverage (the proportion of actual class instances successfully identified, penalising missed cases).
  On dogs, `Transfer` exhibits conservative behaviour with high precision (0.65) and lower recall (0.47): the model is reluctant to
-predict it and is usually right when it does. On cats, `Return_to_owner` has low precision (0.23) and higher recall (0.44): it is predicted twice as often as it should be, a classic artefact of SMOTE expanding synthetic decision boundaries around minority clusters.
+predict it and is usually right when it does. On cats, `Return_to_owner` has low precision (0.23) and higher recall (0.44): it is predicted twice as often as it should be, it could be an artefact of SMOTE expanding synthetic decision boundaries around minority clusters.
 
 This is what F1-macro was protecting against. Averaged with weights, the two tables give 0.58 and 0.79 and look respectable; averaged evenly, they give 0.41 and 0.53, because a model that never predicts `Died` gets no credit for it.
 

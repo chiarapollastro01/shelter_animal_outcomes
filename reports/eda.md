@@ -31,7 +31,7 @@ and oversampling (SMOTE) inside the training pipeline.
 | Column | Missing | Strategy |
 | --- | --- | --- |
 | OutcomeSubtype | 13 612 (~51%) | **Dropped.** Could in principle be a secondary target, but with ~50% missing entries imputation is not appropriate; it also constitutes target leakage. |
-| Name | 7 691 (~29%) | Imputed with `"Unknown"`. Unnamed animals are likely strays, which carries information and justifies the creation of the `has_name`column. |
+| Name | 7 691 (~29%) | Imputed with `"Unknown"`. Unnamed animals are likely strays, which carries information and justifies the creation of the `has_name` column. |
 | AgeuponOutcome | 18 | Imputed with the median age (fitted on train only). |
 | SexuponOutcome | 1 | Imputed with the mode (fitted on train only). |
 | Breed | 0 | **Preventive Imputation & Binning.** Imputed with `"Unknown"`. |
@@ -46,9 +46,7 @@ and oversampling (SMOTE) inside the training pipeline.
 ![Outcome by animal type](figures/outcome_by_animal_type.png)
 
 Looking at the dataset as a single aggregate is misleading: cats are
-transferred in ~50% of cases while dogs are returned to their owner far more
-often (28% vs 4%). For this reason the analysis
-is split into two dedicated tracks, dogs and cats.
+transferred in ~50% of cases while dogs are returned to their owner far more often (28% vs 4%). A single model would not be wrong here, but it would have to learn the same feature interacting with the species before learning anything else: age or reproductive status may push towards adoption in one population and towards transfer in the other. Two independent tournaments let each species pick its own hyperparameters.
 
 ## Age
 
@@ -83,7 +81,7 @@ retaining a sufficient amount of information.
 ![Temporal outcomes — dogs](figures/temporal_outcomes_dog.png)
 ![Temporal outcomes — cats](figures/temporal_outcomes_cat.png)
 
-Outcome proportions vary with month, weekday and hour without exhibiting an interpretable real-world pattern, exception made for surge in adoptions during weekends. This motivates the cyclic sine/cosine encoding of hour,
+Outcome proportions vary with month, weekday and hour without exhibiting an interpretable real-world pattern, with the exception of a surge in adoptions during weekends. This motivates the cyclic sine/cosine encoding of hour,
 weekday and day-of-year plus the `IsWeekend` flag used by
 `TemporalFeaturesExtractor`. Cyclic encoding preserves the adjacency of
 hour 23 and hour 0, which a plain integer encoding would break.

@@ -38,7 +38,7 @@ competition page and place it at `data/raw_data/train.csv`. Its checksum is in
 ## Target distribution
 
 | Outcome | Cat | Dog | Total |
-
+| --- | --- || --- | --- |
 | Adoption | 4 272 | 6 497 | 10 769 |
 | Transfer | 5 505 | 3 917 | 9 422 |
 | Return_to_owner | 500 | 4 286 | 4 786 |
@@ -50,7 +50,7 @@ competition page and place it at `data/raw_data/train.csv`. Its checksum is in
 ## Missing values
 
 | Column | Missing | Share |
-| --- | ---: | ---: |
+| --- | --- | --- |
 | `OutcomeSubtype` | 13 612 | 50.9% |
 | `Name` | 7 691 | 28.8% |
 | `AgeuponOutcome` | 18 | 0.1% |
