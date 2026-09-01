@@ -95,7 +95,7 @@ Python 3.10 or later. The lower bound comes from the `X | None` syntax used
 throughout the type hints.
 
 The complete list of requirements is declared in
-[`pyproject.toml`](./pyproject.toml), with a lower bound at the version the project was developed against and an upper bound excluding the next major, so that a future release cannot silently change the results. The exact versions behind the reported figures are pinned in
+[`pyproject.toml`](./pyproject.toml), with a lower bound at the version the project was developed against and an upper bound excluding the next major, so that a future release cannot silently change the results. The exact versions behind the reported tables are pinned in
 [`requirements-lock.txt`](./requirements-lock.txt).
 
 The raw data file is not versioned. Download `train.csv` from the
@@ -136,7 +136,7 @@ flowchart LR
     prep --> split["data/split_data/"]
     split --> train_dog["rule train (Dog)"]
     split --> train_cat["rule train (Cat)"]
-    train_dog --> models["models/*.pkl + *.json"]
+    train_dog --> models["model and sidecar per species"]
     train_cat --> models
     split --> eval["rule evaluate"]
     models --> eval
@@ -196,6 +196,8 @@ Coverage is at 100%.
 
 ## Table of contents
 
+Only the versioned directories are listed here; the full layout, generated directories included, is below.
+
 | Directory | Description |
 | --- | --- |
 | [`src`](./src/) | The package: configuration, preprocessing, feature engineering, pipeline, training, evaluation and EDA. |
@@ -207,6 +209,9 @@ Coverage is at 100%.
 ### Layout
 
 ```
+README.md              this file
+AUTHORS.md             who wrote this and in what context
+.github/workflows/     the CI workflow
 config.yaml            run parameters: split sizes, folds, metrics, 
                        search grids
 Snakefile              the dependency graph of the three pipeline steps
@@ -214,6 +219,8 @@ pyproject.toml         package metadata, dependencies, tool
                        configuration
 requirements-lock.txt  lists all Python package dependencies and their
                        exact versions
+LICENSE                MIT
+.gitignore             what stays out of the repository
 data/metadata/         provenance and checksum of the raw file
 data/raw_data/         the Kaggle file (not versioned)
 data/split_data/       train/test split (not versioned, rebuilt by the 
@@ -223,10 +230,9 @@ models/                fitted pipelines and their metadata (not
 reports/eda.md         what the exploratory phase found
 reports/results.md     what the trained models score, and what that 
                        means
-reports/figures/       the EDA figures (not versioned, regenerated on 
-                       demand)
-AUTHORS.md             who wrote this and in what context
-.github/workflows/     the CI workflow
+reports/metrics.json   the scores the evaluation step writes (not
+                       versioned, rebuilt by the pipeline)
+reports/figures/       the EDA figures, embedded in eda.md
 src/                   the package
 tests/                 the test suite
 ```
