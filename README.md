@@ -99,7 +99,7 @@ The complete list of requirements is declared in
 [`requirements-lock.txt`](./requirements-lock.txt).
 
 The raw data file is not versioned. Download `train.csv` from the
-[Shelter Animal Outcomes](https://www.kaggle.com/c/shelter-animal-outcomes) competition and place it at `data/raw_data/train.csv`.
+[Shelter Animal Outcomes](https://www.kaggle.com/c/shelter-animal-outcomes) competition and place it at `data/raw_data/train.csv` in the cloned repository.
 [`data/metadata/`](./data/metadata/) documents where the file comes from, what its columns mean and what is missing from them, and carries the checksum of the copy this analysis was run on:
 
 ```bash
@@ -110,8 +110,12 @@ sha256sum -c data/metadata/checksums.txt
 
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
+Clone the repository and create an environment for it:
+
 ```bash
-python -m venv .venv
+git clone https://github.com/chiarapollastro01/shelter_animal_outcomes.git
+cd shelter_animal_outcomes
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
@@ -121,6 +125,9 @@ To reproduce the figures in [`reports/results.md`](./reports/results.md) exactly
 ```bash
 pip install -r requirements-lock.txt
 ```
+
+Check the installation with `pytest`, then follow [Prerequisites](#prerequisites)
+to obtain the raw data file before running the pipeline.
 
 ## Usage
 
