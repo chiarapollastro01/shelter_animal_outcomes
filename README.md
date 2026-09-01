@@ -79,11 +79,10 @@ Taking the maximum over 90 estimates is itself optimistic: the winner is partly 
 folds.
 
 > [!NOTE]
-> Two grid points can be separated by less than the noise. An earlier run of the
-> same code on a slightly different set of library versions crowned a 100-tree
-> forest where the current one crowns 200 trees, on a difference in the fourth
-> decimal. Not every winning hyperparameter value is a result; the exact
-> environment behind the reported figures is frozen in `requirements-lock.txt`.
+> Two grid points can be separated by less than the noise: an earlier run of the
+> same code, on a different patch release of scikit-learn, crowned a different
+> but statistically indistinguishable configuration. The exact environment behind the reported
+> figures is frozen in `requirements-lock.txt`.
 
 ### What is finally saved
 
@@ -91,8 +90,8 @@ Once the configuration is chosen, it is refit on **all** of the species data, ho
 
 ## Prerequisites
 
-Python 3.10 or later. The lower bound comes from the `X | None` syntax used
-throughout the type hints.
+Python 3.10 or later. The lower bound comes from the dependencies: `numpy`, `scikit-learn`, `imbalanced-learn` and `matplotlib` all declare
+`>=3.10` at the versions pinned in `requirements-lock.txt`.
 
 The complete list of requirements is declared in
 [`pyproject.toml`](./pyproject.toml), with a lower bound at the version the project was developed against and an upper bound excluding the next major, so that a future release cannot silently change the results. The exact versions behind the reported tables are pinned in
@@ -160,7 +159,7 @@ snakemake --cores all --detailed-summary    # provenance of every output
 
 ### About the cores
 
-`--cores` bounds how many Snakemake jobs run at once, but the two tournaments are declared with `threads: workflow.cores`, so they run one after the other.
+`--cores` sets the total thread budget, and the two tournaments each declare `threads: workflow.cores`, so they cannot run at the same time.
 That is deliberate: `GridSearchCV` inside each of them already uses `n_jobs=-1`, and overlapping the two would have them compete for the same CPUs. The parallelism that pays here is in the search, not between the species.
 
 ### Command line interface
@@ -177,7 +176,9 @@ python -m src.evaluate
 
 ### The exploratory analysis
 
-[`src/eda.py`](./src/eda.py) is not part of the Snakefile: it produces figures that no later step consumes, and rebuilding them on every change of the raw file would cost time for nothing. Run it when you want them:
+[`src/eda.py`](./src/eda.py) is not part of the Snakefile: the figures it
+produces are committed alongside `reports/eda.md` and feed no later step, so rebuilding them on every change of the raw file would cost time for nothing.
+Regenerate them when the exploratory analysis changes:
 
 ```bash
 python -m src.eda data/raw_data/train.csv --figures-dir reports/figures
@@ -197,7 +198,8 @@ The same three commands run on every push and pull request through
 
 The suite is built in three cumulative layers. Unit tests cover each function on
 its typical case and its edge cases, every one of them documented in
-GIVEN / WHEN / THEN form. Doctests keep the documented examples honest. Property based tests, written with [`hypothesis`](https://hypothesis.readthedocs.io), check the statements the docstrings make across generated inputs rather than chosen ones, that any written age round-trips through the parser, and that the share of rows collapsed into `Other` respects its declared ceiling for any distribution of categories.
+GIVEN / WHEN / THEN form. Doctests keep the documented examples honest. Property based tests, written with [`hypothesis`](https://hypothesis.readthedocs.io), check invariants across
+generated inputs rather than chosen ones: that any written age round-trips through the parser and that a string naming no unit never becomes a number, that the share of rows collapsed into `Other` respects the ceiling its docstring declares for any distribution of categories, and that grouping twice equals grouping once.
 
 Coverage is at 100%.
 
