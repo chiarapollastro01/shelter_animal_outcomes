@@ -65,7 +65,7 @@ Hyperparameters for data preprocessing (`max_other_ratio` for rare category binn
 
 The derivation and exploratory motivation for each feature are documented in [`reports/eda.md`](./reports/eda.md). After filling the missing values, different approaches are used for the engineering of the features: periodic temporal quantities are mapped onto the unit circle as a sine and cosine pair,
 
-$$x_{\sin} = \sin\!\left(\frac{2\pi t}{T}\right), \qquad x_{\cos} = \cos\!\left(\frac{2\pi t}{T}\right)$$
+$$x_{\sin} = \sin\left(\frac{2\pi t}{T}\right), \qquad x_{\cos} = \cos\left(\frac{2\pi t}{T}\right)$$
 
 with $T$ equal to 24, 7 or 365, so that hour 23 stays adjacent to hour 0 instead of being the farthest point in the column.
 Age is compressed with `log1p` rather than a plain logarithm, since the latter is undefined at zero, which is exactly where newborn animals sit.
