@@ -1,3 +1,6 @@
+# Full freeze of the environment that produced the figures in reports/.
+# Wider than pyproject.toml declares: it records what was installed, not what
+# everything is required.
 anyio==4.14.2
 appdirs==1.4.4
 argon2-cffi==25.1.0
@@ -122,7 +125,6 @@ scikit-learn==1.7.2
 scipy==1.15.3
 seaborn==0.13.2
 Send2Trash==2.1.0
--e git+ssh://git@github.com/chiarapollastro01/shelter_animal_outcomes.git@72b908480550fe4925bb8cac4ec086c11303bfb9#egg=shelter_animal_outcomes
 six==1.17.0
 sklearn-compat==0.1.6
 smart_open==8.0.1
