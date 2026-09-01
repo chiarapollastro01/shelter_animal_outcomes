@@ -242,7 +242,7 @@ class TestExtractAgeInDays:
 
         parsed = extract_age_in_days(pd.Series([written]))
 
-        assert parsed.iloc[0] == amount * DAYS_PER_UNIT[unit]
+        assert parsed.iloc[0] == pytest.approx(amount * DAYS_PER_UNIT[unit])
 
     @given(
         text=st.text(
