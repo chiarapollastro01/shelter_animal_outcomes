@@ -224,9 +224,8 @@ __marimo__/
 data/raw_data/
 data/split_data/
 
-# Generated models, plots, and metrics
+# Generated models and and metrics
 models/
-reports/figures/*.png
 reports/metrics.json
 *.joblib
 *.pkl

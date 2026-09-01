@@ -95,5 +95,4 @@ SexuponOutcome analysis reveals that outcome probabilities differ drastically ba
 ---
 
 *This report is the frozen narrative of the exploratory phase. The
-reusable logic lives in `src/eda.py` (tested in `tests/test_eda.py`); the
-figures are regenerated on demand and are not committed.*
+reusable logic lives in `src/eda.py` (tested in `tests/test_eda.py`).*
